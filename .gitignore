@@ -1,0 +1,20 @@
+# artifacts of the convenience "make" in the repo root
+/btusb.c
+/btbcm.h
+/btintel.h
+/btmrvl_drv.h
+/btmrvl_sdio.h
+/btmtk.h
+/btqca.h
+/btrtl.h
+/h4_recv.h
+/hci_uart.h
+*.o
+*.o.d
+*.ko
+*.mod
+*.mod.c
+.*.cmd
+modules.order
+Module.symvers
+.module-common.o

@@ -871,6 +871,7 @@ struct qca_dump_info {
 #define BTUSB_ALT6_CONTINUOUS_TX	16
 #define BTUSB_HW_SSR_ACTIVE	17
 #define BTUSB_FAKE_CSR		18
+#define BTUSB_CSR_EVENT_SEEN	19
 
 struct btusb_data {
 	struct hci_dev       *hdev;
@@ -1097,6 +1098,40 @@ static void btusb_csr_reset(struct hci_dev *hdev)
 		return;
 	}
 
+	btusb_reset(hdev);
+}
+
+/* Fake CSR clones can wedge so hard that they stop answering HCI commands
+ * entirely; only a USB reset (equivalent to a physical replug) revives them.
+ * When that happens while hci_dev_do_open() waits for its first command, the
+ * core times out and closes the device, cancelling cmd_timer before the
+ * reset/cmd_timeout callback above ever runs - so recovery must be driven
+ * from close: if not a single HCI event arrived between open and close,
+ * reset. Rate-limited module-wide because a reset rebinds the driver with
+ * fresh flags, so per-device state cannot stop a dead dongle from looping.
+ */
+static void btusb_csr_reset_on_silent_close(struct hci_dev *hdev)
+{
+	static unsigned long btusb_csr_last_silent_reset;
+	struct btusb_data *data = hci_get_drvdata(hdev);
+
+	if (!test_bit(BTUSB_FAKE_CSR, &data->flags) ||
+	    test_bit(BTUSB_CSR_EVENT_SEEN, &data->flags))
+		return;
+
+	if (btusb_csr_last_silent_reset &&
+	    time_before(jiffies, btusb_csr_last_silent_reset + 30 * HZ)) {
+		bt_dev_warn(hdev, "CSR: silent close, skipping usb reset (rate-limited)");
+		return;
+	}
+
+	if (test_and_set_bit(BTUSB_HW_RESET_ACTIVE, &data->flags)) {
+		bt_dev_warn(hdev, "CSR: silent close, but reset already active");
+		return;
+	}
+
+	btusb_csr_last_silent_reset = jiffies;
+	bt_dev_warn(hdev, "CSR: no HCI events since open; queueing usb reset");
 	btusb_reset(hdev);
 }
 
@@ -1431,6 +1466,10 @@ static void btusb_intr_complete(struct urb *urb)
 
 	if (urb->status == 0) {
 		hdev->stat.byte_rx += urb->actual_length;
+
+		if (urb->actual_length &&
+		    test_bit(BTUSB_FAKE_CSR, &data->flags))
+			set_bit(BTUSB_CSR_EVENT_SEEN, &data->flags);
 
 		if (btusb_recv_intr(data, urb->transfer_buffer,
 				    urb->actual_length) < 0) {
@@ -1946,6 +1985,8 @@ static int btusb_open(struct hci_dev *hdev)
 	if (err < 0)
 		return err;
 
+	clear_bit(BTUSB_CSR_EVENT_SEEN, &data->flags);
+
 	/* Patching USB firmware files prior to starting any URBs of HCI path
 	 * It is more safe to use USB bulk channel for downloading USB patch
 	 */
@@ -2018,6 +2059,8 @@ static int btusb_close(struct hci_dev *hdev)
 
 	btusb_stop_traffic(data);
 	btusb_free_frags(data);
+
+	btusb_csr_reset_on_silent_close(hdev);
 
 	err = usb_autopm_get_interface(data->intf);
 	if (err < 0)
@@ -2528,8 +2571,8 @@ static int btusb_setup_csr(struct hci_dev *hdev)
 		ret = PTR_ERR(skb);
 		bt_dev_warn(hdev, "CSR: Local version failed (%d)", ret);
 
-		if (ret == -EPIPE) {
-			bt_dev_warn(hdev, "CSR: queueing usb reset after Local Version -EPIPE");
+		if (ret == -EPIPE || ret == -ETIMEDOUT) {
+			bt_dev_warn(hdev, "CSR: queueing usb reset after Local Version failure (%d)", ret);
 			btusb_reset(hdev);
 		}
 

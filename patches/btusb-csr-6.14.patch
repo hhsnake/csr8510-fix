@@ -1,15 +1,16 @@
 diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
 --- a/drivers/bluetooth/btusb.c
 +++ b/drivers/bluetooth/btusb.c
-@@ -870,6 +870,7 @@
+@@ -870,6 +870,8 @@
  #define BTUSB_USE_ALT3_FOR_WBS	15
  #define BTUSB_ALT6_CONTINUOUS_TX	16
  #define BTUSB_HW_SSR_ACTIVE	17
 +#define BTUSB_FAKE_CSR		18
++#define BTUSB_CSR_EVENT_SEEN	19
  
  struct btusb_data {
  	struct hci_dev       *hdev;
-@@ -1078,6 +1079,27 @@
+@@ -1078,6 +1080,61 @@
  	btusb_rtl_alloc_devcoredump(hdev, &hdr, NULL, 0);
  }
  
@@ -34,10 +35,73 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
 +	btusb_reset(hdev);
 +}
 +
++/* Fake CSR clones can wedge so hard that they stop answering HCI commands
++ * entirely; only a USB reset (equivalent to a physical replug) revives them.
++ * When that happens while hci_dev_do_open() waits for its first command, the
++ * core times out and closes the device, cancelling cmd_timer before the
++ * reset/cmd_timeout callback above ever runs - so recovery must be driven
++ * from close: if not a single HCI event arrived between open and close,
++ * reset. Rate-limited module-wide because a reset rebinds the driver with
++ * fresh flags, so per-device state cannot stop a dead dongle from looping.
++ */
++static void btusb_csr_reset_on_silent_close(struct hci_dev *hdev)
++{
++	static unsigned long btusb_csr_last_silent_reset;
++	struct btusb_data *data = hci_get_drvdata(hdev);
++
++	if (!test_bit(BTUSB_FAKE_CSR, &data->flags) ||
++	    test_bit(BTUSB_CSR_EVENT_SEEN, &data->flags))
++		return;
++
++	if (btusb_csr_last_silent_reset &&
++	    time_before(jiffies, btusb_csr_last_silent_reset + 30 * HZ)) {
++		bt_dev_warn(hdev, "CSR: silent close, skipping usb reset (rate-limited)");
++		return;
++	}
++
++	if (test_and_set_bit(BTUSB_HW_RESET_ACTIVE, &data->flags)) {
++		bt_dev_warn(hdev, "CSR: silent close, but reset already active");
++		return;
++	}
++
++	btusb_csr_last_silent_reset = jiffies;
++	bt_dev_warn(hdev, "CSR: no HCI events since open; queueing usb reset");
++	btusb_reset(hdev);
++}
++
  static void btusb_qca_reset(struct hci_dev *hdev)
  {
  	struct btusb_data *data = hci_get_drvdata(hdev);
-@@ -2423,6 +2445,72 @@
+@@ -1410,6 +1467,10 @@
+ 	if (urb->status == 0) {
+ 		hdev->stat.byte_rx += urb->actual_length;
+ 
++		if (urb->actual_length &&
++		    test_bit(BTUSB_FAKE_CSR, &data->flags))
++			set_bit(BTUSB_CSR_EVENT_SEEN, &data->flags);
++
+ 		if (btusb_recv_intr(data, urb->transfer_buffer,
+ 				    urb->actual_length) < 0) {
+ 			bt_dev_err(hdev, "corrupted event packet");
+@@ -1924,6 +1985,8 @@
+ 	if (err < 0)
+ 		return err;
+ 
++	clear_bit(BTUSB_CSR_EVENT_SEEN, &data->flags);
++
+ 	/* Patching USB firmware files prior to starting any URBs of HCI path
+ 	 * It is more safe to use USB bulk channel for downloading USB patch
+ 	 */
+@@ -1997,6 +2060,8 @@
+ 	btusb_stop_traffic(data);
+ 	btusb_free_frags(data);
+ 
++	btusb_csr_reset_on_silent_close(hdev);
++
+ 	err = usb_autopm_get_interface(data->intf);
+ 	if (err < 0)
+ 		goto failed;
+@@ -2423,6 +2488,72 @@
  	return 0;
  }
  
@@ -110,7 +174,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  static int btusb_setup_csr(struct hci_dev *hdev)
  {
  	struct btusb_data *data = hci_get_drvdata(hdev);
-@@ -2437,9 +2525,15 @@
+@@ -2437,9 +2568,15 @@
  	skb = __hci_cmd_sync(hdev, HCI_OP_READ_LOCAL_VERSION, 0, NULL,
  			     HCI_INIT_TIMEOUT);
  	if (IS_ERR(skb)) {
@@ -120,8 +184,8 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
 +		ret = PTR_ERR(skb);
 +		bt_dev_warn(hdev, "CSR: Local version failed (%d)", ret);
 +
-+		if (ret == -EPIPE) {
-+			bt_dev_warn(hdev, "CSR: queueing usb reset after Local Version -EPIPE");
++		if (ret == -EPIPE || ret == -ETIMEDOUT) {
++			bt_dev_warn(hdev, "CSR: queueing usb reset after Local Version failure (%d)", ret);
 +			btusb_reset(hdev);
 +		}
 +
@@ -129,7 +193,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	rp = skb_pull_data(skb, sizeof(*rp));
-@@ -2510,7 +2604,10 @@
+@@ -2510,7 +2647,10 @@
  		is_fake = true;
  
  	if (is_fake) {
@@ -140,7 +204,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  
  		/* Generally these clones have big discrepancies between
  		 * advertised features and what's actually supported.
-@@ -2524,6 +2621,14 @@
+@@ -2524,6 +2664,14 @@
  		hci_set_quirk(hdev, HCI_QUIRK_BROKEN_READ_VOICE_SETTING);
  		hci_set_quirk(hdev, HCI_QUIRK_BROKEN_READ_PAGE_SCAN_TYPE);
  
@@ -155,7 +219,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  		/* Clear the reset quirk since this is not an actual
  		 * early Bluetooth 1.1 device from CSR.
  		 */
-@@ -2550,23 +2655,61 @@
+@@ -2550,23 +2698,61 @@
  		 * To fix 2. clear the HCI's can_wake flag, this way the HCI
  		 * will still be autosuspended when it is not open.
  		 *
@@ -224,7 +288,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  
  		/* Re-enable autosuspend if this was requested */
  		if (enable_autosuspend)
-@@ -4175,8 +4318,10 @@
+@@ -4175,8 +4361,10 @@
  
  		/* Fake CSR devices with broken commands */
  		if (le16_to_cpu(udev->descriptor.idVendor)  == 0x0a12 &&

@@ -2734,6 +2734,14 @@ static int btusb_setup_csr(struct hci_dev *hdev)
 		} else {
 			data->intf->needs_remote_wakeup = 0;
 			ret = pm_runtime_force_suspend(&data->udev->dev);
+			if (ret < 0) {
+				/* Transient -EBUSY while something else still
+				 * holds the interface during boot; retry once.
+				 */
+				btusb_log_csr_pm_state(hdev, data, "force_suspend failed; retrying", ret);
+				msleep(100);
+				ret = pm_runtime_force_suspend(&data->udev->dev);
+			}
 			data->intf->needs_remote_wakeup = 1;
 
 			btusb_log_csr_pm_state(hdev, data, "after force_suspend", ret);
@@ -2743,11 +2751,11 @@ static int btusb_setup_csr(struct hci_dev *hdev)
 				ret = pm_runtime_force_resume(&data->udev->dev);
 				btusb_log_csr_pm_state(hdev, data, "after force_resume", ret);
 			} else {
-				bt_dev_warn(hdev, "CSR: force_suspend failed");
-				btusb_log_csr_pm_state(hdev, data, "force_suspend failed", ret);
-				/* force_suspend disabled runtime PM on failure; undo it */
-				pm_runtime_enable(&data->udev->dev);
-				btusb_log_csr_pm_state(hdev, data, "after re-enable", 0);
+				/* pm_runtime_force_suspend() re-enables runtime
+				 * PM itself on failure; carry on without the
+				 * one-shot suspend cycle.
+				 */
+				bt_dev_warn(hdev, "CSR: force_suspend failed; skipping one-shot suspend");
 			}
 		}
 

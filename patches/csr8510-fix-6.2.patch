@@ -213,7 +213,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  		/* Clear the reset quirk since this is not an actual
  		 * early Bluetooth 1.1 device from CSR.
  		 */
-@@ -2326,23 +2468,61 @@
+@@ -2326,23 +2468,69 @@
  		 * To fix 2. clear the HCI's can_wake flag, this way the HCI
  		 * will still be autosuspended when it is not open.
  		 *
@@ -259,8 +259,17 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
 +		} else {
 +			data->intf->needs_remote_wakeup = 0;
 +			ret = pm_runtime_force_suspend(&data->udev->dev);
++			if (ret < 0) {
++				/* Transient -EBUSY while something else still
++				 * holds the interface during boot; retry once.
++				 */
++				btusb_log_csr_pm_state(hdev, data, "force_suspend failed; retrying", ret);
++				msleep(100);
++				ret = pm_runtime_force_suspend(&data->udev->dev);
++			}
 +			data->intf->needs_remote_wakeup = 1;
-+
+ 
+-		device_set_wakeup_capable(&data->udev->dev, false);
 +			btusb_log_csr_pm_state(hdev, data, "after force_suspend", ret);
 +
 +			if (ret >= 0) {
@@ -268,21 +277,20 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
 +				ret = pm_runtime_force_resume(&data->udev->dev);
 +				btusb_log_csr_pm_state(hdev, data, "after force_resume", ret);
 +			} else {
-+				bt_dev_warn(hdev, "CSR: force_suspend failed");
-+				btusb_log_csr_pm_state(hdev, data, "force_suspend failed", ret);
-+				/* force_suspend disabled runtime PM on failure; undo it */
-+				pm_runtime_enable(&data->udev->dev);
-+				btusb_log_csr_pm_state(hdev, data, "after re-enable", 0);
++				/* pm_runtime_force_suspend() re-enables runtime
++				 * PM itself on failure; carry on without the
++				 * one-shot suspend cycle.
++				 */
++				bt_dev_warn(hdev, "CSR: force_suspend failed; skipping one-shot suspend");
 +			}
 +		}
- 
--		device_set_wakeup_capable(&data->udev->dev, false);
++
 +		pm_runtime_forbid(&data->udev->dev);
 +		btusb_log_csr_pm_state(hdev, data, "after forbid", 0);
  
  		/* Re-enable autosuspend if this was requested */
  		if (enable_autosuspend)
-@@ -4199,8 +4379,10 @@
+@@ -4199,8 +4387,10 @@
  
  		/* Fake CSR devices with broken commands */
  		if (le16_to_cpu(udev->descriptor.idVendor)  == 0x0a12 &&

@@ -5,7 +5,7 @@
 # Usage: sudo ./install.sh
 set -euo pipefail
 
-PACKAGE=btusb-csr
+PACKAGE=csr8510-fix
 VERSION=$(sed -n 's/^PACKAGE_VERSION="\(.*\)"/\1/p' "$(dirname "$0")/dkms.conf")
 SRC=/usr/src/$PACKAGE-$VERSION
 REPO_DIR=$(cd "$(dirname "$0")" && pwd)

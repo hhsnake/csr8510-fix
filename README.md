@@ -1,4 +1,4 @@
-# csr-dongle-fix
+# csr8510-fix
 
 Patched Linux `btusb` driver for **fake CSR8510 A10 / CSR 4.0–5.x clone USB
 Bluetooth dongles** (`0a12:0001`), packaged as DKMS so it is rebuilt
@@ -45,8 +45,8 @@ Only detected fake devices are affected — real CSR hardware is untouched.
 
 ```bash
 sudo apt install dkms linux-headers-$(uname -r)
-git clone https://github.com/hhsnake/csr-dongle-fix.git
-cd csr-dongle-fix
+git clone https://github.com/hhsnake/csr8510-fix.git
+cd csr8510-fix
 sudo ./install.sh
 ```
 
@@ -57,7 +57,7 @@ and rebuilt automatically by DKMS on every kernel update.
 Verify:
 
 ```bash
-dkms status btusb-csr                # -> installed
+dkms status csr8510-fix                # -> installed
 modinfo -F filename btusb            # -> .../updates/dkms/btusb.ko(.zst)
 journalctl -kf | grep -iE 'bluetooth|csr'   # then plug in the dongle
 ```
@@ -79,7 +79,7 @@ sudo ./uninstall.sh
 
 The right variant is picked automatically at build time. Untested versions
 in between get the nearest variant and usually build fine; if the build
-fails, check `/var/lib/dkms/btusb-csr/<version>/build/make.log` and open
+fails, check `/var/lib/dkms/csr8510-fix/<version>/build/make.log` and open
 an issue.
 
 ## Building your own kernel instead?
@@ -88,7 +88,7 @@ Apply the matching diff from [`patches/`](patches/):
 
 ```bash
 cd linux-<version>
-patch -p1 < .../patches/btusb-csr-6.17.patch
+patch -p1 < .../patches/csr8510-fix-6.17.patch
 ```
 
 ## Troubleshooting
@@ -103,7 +103,7 @@ patch -p1 < .../patches/btusb-csr-6.17.patch
 ## Questions & feedback
 
 Bug reports, questions and suggestions are welcome in
-[GitHub Issues](https://github.com/hhsnake/csr-dongle-fix/issues).
+[GitHub Issues](https://github.com/hhsnake/csr8510-fix/issues).
 When reporting, please attach the output of `uname -r`,
 `lsusb | grep 0a12` and `journalctl -k | grep -iE 'bluetooth|csr'`.
 

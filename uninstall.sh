@@ -1,10 +1,10 @@
 #!/bin/bash
-# Remove the btusb-csr DKMS package and return to the stock kernel driver.
+# Remove the csr8510-fix DKMS package and return to the stock kernel driver.
 #
 # Usage: sudo ./uninstall.sh
 set -euo pipefail
 
-PACKAGE=btusb-csr
+PACKAGE=csr8510-fix
 
 msg() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }

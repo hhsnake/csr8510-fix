@@ -26,7 +26,7 @@ min="${rest%%.*}"
 
 case "$maj$min" in
     *[!0-9]*|'')
-        echo "btusb-csr: cannot parse kernel version '$kv'" >&2
+        echo "csr8510-fix: cannot parse kernel version '$kv'" >&2
         exit 1
         ;;
 esac
@@ -45,14 +45,14 @@ case "$n" in
     *)                   tested=no  ;;
 esac
 
-echo "btusb-csr: kernel $kv -> source variant src/$variant"
+echo "csr8510-fix: kernel $kv -> source variant src/$variant"
 if [ "$tested" = no ]; then
-    echo "btusb-csr: note: kernel series $maj.$min is untested with this" \
+    echo "csr8510-fix: note: kernel series $maj.$min is untested with this" \
          "package; using the nearest variant. If the build fails, please" \
-         "open an issue at https://github.com/hhsnake/csr-dongle-fix" >&2
+         "open an issue at https://github.com/hhsnake/csr8510-fix" >&2
 fi
 if [ "$n" -lt 608 ]; then
-    echo "btusb-csr: warning: kernels older than 6.8 were never targeted" \
+    echo "csr8510-fix: warning: kernels older than 6.8 were never targeted" \
          "and will likely fail to build." >&2
 fi
 

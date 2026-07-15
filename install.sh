@@ -34,11 +34,12 @@ chmod +x "$SRC/select-variant.sh"
 # --- (re)register with DKMS ----------------------------------------------
 # Remove any previously registered version of this package so reinstalls
 # and upgrades are clean.
-if dkms status "$PACKAGE" 2>/dev/null | grep -q "$PACKAGE"; then
+EXISTING=$(dkms status "$PACKAGE" 2>/dev/null | \
+           sed -n "s|^$PACKAGE[/,] *\([^,: ]*\).*|\1|p" | sort -u)
+if [ -n "$EXISTING" ]; then
     msg "Removing previously registered $PACKAGE versions"
-    dkms status "$PACKAGE" | sed -n "s|^$PACKAGE[/,] *\([^,: ]*\).*|\1|p" | sort -u | \
-    while read -r oldver; do
-        [ -n "$oldver" ] && dkms remove -m "$PACKAGE" -v "$oldver" --all || true
+    for oldver in $EXISTING; do
+        dkms remove -m "$PACKAGE" -v "$oldver" --all || true
     done
 fi
 

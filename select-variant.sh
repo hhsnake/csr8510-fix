@@ -5,7 +5,11 @@
 #
 # Variants (each is the full patched drivers/bluetooth/btusb.c of that
 # kernel series plus the local headers it includes):
-#   src/6.8   - kernels < 6.11     (tested on 6.8.0-94-generic)
+#   src/5.15  - kernels < 5.19     (tested on 5.15.0-185-generic)
+#   src/5.19  - kernels 5.19..6.1  (tested on 5.19.0-50-generic)
+#   src/6.2   - kernels 6.2..6.4   (tested on 6.2.0-39-generic)
+#   src/6.5   - kernels 6.5..6.7   (tested on 6.5.0-45-generic)
+#   src/6.8   - kernels 6.8..6.10  (tested on 6.8.0-94/134-generic)
 #   src/6.11  - kernels 6.11..6.13 (tested on 6.11.0-29-generic)
 #   src/6.14  - kernels 6.14..6.16 (tested on 6.14.0-37-generic; these
 #                                   Ubuntu/stable trees backported the
@@ -36,13 +40,17 @@ n=$((maj * 100 + min))
 if   [ "$n" -ge 617 ]; then variant=6.17
 elif [ "$n" -ge 614 ]; then variant=6.14
 elif [ "$n" -ge 611 ]; then variant=6.11
-else                        variant=6.8
+elif [ "$n" -ge 608 ]; then variant=6.8
+elif [ "$n" -ge 605 ]; then variant=6.5
+elif [ "$n" -ge 602 ]; then variant=6.2
+elif [ "$n" -ge 519 ]; then variant=5.19
+else                        variant=5.15
 fi
 
 # Versions the variants were actually built and run against.
 case "$n" in
-    608|611|614|617|700) tested=yes ;;
-    *)                   tested=no  ;;
+    515|519|602|605|608|611|614|617|700) tested=yes ;;
+    *)                                   tested=no  ;;
 esac
 
 echo "csr8510-fix: kernel $kv -> source variant src/$variant"
@@ -51,8 +59,8 @@ if [ "$tested" = no ]; then
          "package; using the nearest variant. If the build fails, please" \
          "open an issue at https://github.com/hhsnake/csr8510-fix" >&2
 fi
-if [ "$n" -lt 608 ]; then
-    echo "csr8510-fix: warning: kernels older than 6.8 were never targeted" \
+if [ "$n" -lt 515 ]; then
+    echo "csr8510-fix: warning: kernels older than 5.15 were never targeted" \
          "and will likely fail to build." >&2
 fi
 

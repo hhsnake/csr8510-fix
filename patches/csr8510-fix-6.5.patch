@@ -1,0 +1,296 @@
+diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
+--- a/drivers/bluetooth/btusb.c
++++ b/drivers/bluetooth/btusb.c
+@@ -789,6 +789,8 @@
+ #define BTUSB_USE_ALT3_FOR_WBS	15
+ #define BTUSB_ALT6_CONTINUOUS_TX	16
+ #define BTUSB_HW_SSR_ACTIVE	17
++#define BTUSB_FAKE_CSR		18
++#define BTUSB_CSR_EVENT_SEEN	19
+ 
+ struct btusb_data {
+ 	struct hci_dev       *hdev;
+@@ -938,6 +940,58 @@
+ 	gpiod_set_value_cansleep(reset_gpio, 0);
+ }
+ 
++static void btusb_csr_cmd_timeout(struct hci_dev *hdev)
++{
++	struct btusb_data *data = hci_get_drvdata(hdev);
++
++	if (!test_bit(BTUSB_FAKE_CSR, &data->flags))
++		return;
++
++	bt_dev_err(hdev, "CSR: command timeout recovery attempt %u",
++		   data->cmd_timeout_cnt + 1);
++
++	if (test_and_set_bit(BTUSB_HW_RESET_ACTIVE, &data->flags)) {
++		bt_dev_err(hdev, "CSR: last reset still active, not resetting again");
++		return;
++	}
++
++	btusb_reset(hdev);
++}
++
++/* Fake CSR clones can wedge so hard that they stop answering HCI commands
++ * entirely; only a USB reset (equivalent to a physical replug) revives them.
++ * When that happens while hci_dev_do_open() waits for its first command, the
++ * core times out and closes the device, cancelling cmd_timer before the
++ * cmd_timeout callback above ever runs - so recovery must be driven from
++ * close: if not a single HCI event arrived between open and close, reset.
++ * Rate-limited module-wide because a reset rebinds the driver with fresh
++ * flags, so per-device state cannot stop a dead dongle from looping.
++ */
++static void btusb_csr_reset_on_silent_close(struct hci_dev *hdev)
++{
++	static unsigned long btusb_csr_last_silent_reset;
++	struct btusb_data *data = hci_get_drvdata(hdev);
++
++	if (!test_bit(BTUSB_FAKE_CSR, &data->flags) ||
++	    test_bit(BTUSB_CSR_EVENT_SEEN, &data->flags))
++		return;
++
++	if (btusb_csr_last_silent_reset &&
++	    time_before(jiffies, btusb_csr_last_silent_reset + 30 * HZ)) {
++		bt_dev_warn(hdev, "CSR: silent close, skipping usb reset (rate-limited)");
++		return;
++	}
++
++	if (test_and_set_bit(BTUSB_HW_RESET_ACTIVE, &data->flags)) {
++		bt_dev_warn(hdev, "CSR: silent close, but reset already active");
++		return;
++	}
++
++	btusb_csr_last_silent_reset = jiffies;
++	bt_dev_warn(hdev, "CSR: no HCI events since open; queueing usb reset");
++	btusb_reset(hdev);
++}
++
+ static void btusb_qca_cmd_timeout(struct hci_dev *hdev)
+ {
+ 	struct btusb_data *data = hci_get_drvdata(hdev);
+@@ -1233,6 +1287,10 @@
+ 	if (urb->status == 0) {
+ 		hdev->stat.byte_rx += urb->actual_length;
+ 
++		if (urb->actual_length &&
++		    test_bit(BTUSB_FAKE_CSR, &data->flags))
++			set_bit(BTUSB_CSR_EVENT_SEEN, &data->flags);
++
+ 		if (btusb_recv_intr(data, urb->transfer_buffer,
+ 				    urb->actual_length) < 0) {
+ 			bt_dev_err(hdev, "corrupted event packet");
+@@ -1739,6 +1797,8 @@
+ 	if (err < 0)
+ 		return err;
+ 
++	clear_bit(BTUSB_CSR_EVENT_SEEN, &data->flags);
++
+ 	/* Patching USB firmware files prior to starting any URBs of HCI path
+ 	 * It is more safe to use USB bulk channel for downloading USB patch
+ 	 */
+@@ -1812,6 +1872,8 @@
+ 	btusb_stop_traffic(data);
+ 	btusb_free_frags(data);
+ 
++	btusb_csr_reset_on_silent_close(hdev);
++
+ 	err = usb_autopm_get_interface(data->intf);
+ 	if (err < 0)
+ 		goto failed;
+@@ -2237,6 +2299,68 @@
+ 	return 0;
+ }
+ 
++/* Unbranded CSR clones return undersized payloads for several HCI commands.
++ * HCI_QUIRK_BROKEN_READ_VOICE_SETTING and HCI_QUIRK_BROKEN_READ_PAGE_SCAN_TYPE
++ * were added to the kernel after 6.8.0-94 and are not available in the running
++ * bluetooth.ko, so we intercept all three commands at the transport layer and
++ * pad the missing byte so the core parser stays in sync.
++ *
++ * Known short responses (clone payload vs. expected):
++ *   HCI_OP_READ_VOICE_SETTING  (0x0c25): 2 bytes instead of 3
++ *   HCI_OP_READ_TX_POWER       (0x0c2d): 3 bytes instead of 4
++ *   HCI_OP_READ_PAGE_SCAN_TYPE (0x0c46): 1 byte  instead of 2
++ */
++static int btusb_recv_event_csr(struct hci_dev *hdev, struct sk_buff *skb)
++{
++	struct hci_event_hdr *hdr = (void *)skb->data;
++	struct hci_ev_cmd_complete *cc;
++	u16 opcode;
++	u8 expected_plen;
++
++	if (skb->len < sizeof(*hdr) + sizeof(*cc) ||
++	    hdr->evt != HCI_EV_CMD_COMPLETE)
++		goto done;
++
++	cc = (void *)(skb->data + sizeof(*hdr));
++	opcode = le16_to_cpu(cc->opcode);
++
++	switch (opcode) {
++	case HCI_OP_READ_VOICE_SETTING:
++		expected_plen = sizeof(*cc) + 3; /* status + __le16 */
++		break;
++	case HCI_OP_READ_TX_POWER:
++		expected_plen = sizeof(*cc) + 4; /* status + __le16 handle + s8 */
++		break;
++	case HCI_OP_READ_PAGE_SCAN_TYPE:
++		expected_plen = sizeof(*cc) + 2; /* status + u8 type */
++		break;
++	default:
++		goto done;
++	}
++
++	if (hdr->plen == expected_plen - 1 && skb_tailroom(skb) >= 1) {
++		bt_dev_dbg(hdev, "CSR: padding short response for opcode 0x%04x", opcode);
++		skb_put_u8(skb, 0x00);
++		hdr->plen++;
++	}
++
++done:
++	return hci_recv_frame(hdev, skb);
++}
++
++static void btusb_log_csr_pm_state(struct hci_dev *hdev, struct btusb_data *data,
++				   const char *stage, int ret)
++{
++	bt_dev_info(hdev,
++		    "CSR: %s: ret=%d enabled=%d suspended=%d usage=%d child=%d nrw=%d wakeup_capable=%d",
++		    stage, ret, pm_runtime_enabled(&data->udev->dev),
++		    pm_runtime_status_suspended(&data->udev->dev),
++		    atomic_read(&data->udev->dev.power.usage_count),
++		    atomic_read(&data->udev->dev.power.child_count),
++		    data->intf->needs_remote_wakeup,
++		    device_can_wakeup(&data->udev->dev));
++}
++
+ static int btusb_setup_csr(struct hci_dev *hdev)
+ {
+ 	struct btusb_data *data = hci_get_drvdata(hdev);
+@@ -2251,9 +2375,15 @@
+ 	skb = __hci_cmd_sync(hdev, HCI_OP_READ_LOCAL_VERSION, 0, NULL,
+ 			     HCI_INIT_TIMEOUT);
+ 	if (IS_ERR(skb)) {
+-		int err = PTR_ERR(skb);
+-		bt_dev_err(hdev, "CSR: Local version failed (%d)", err);
+-		return err;
++		ret = PTR_ERR(skb);
++		bt_dev_warn(hdev, "CSR: Local version failed (%d)", ret);
++
++		if (ret == -EPIPE || ret == -ETIMEDOUT) {
++			bt_dev_warn(hdev, "CSR: queueing usb reset after Local Version failure (%d)", ret);
++			btusb_reset(hdev);
++		}
++
++		return ret;
+ 	}
+ 
+ 	rp = skb_pull_data(skb, sizeof(*rp));
+@@ -2324,7 +2454,10 @@
+ 		is_fake = true;
+ 
+ 	if (is_fake) {
++		int child_count;
++
+ 		bt_dev_warn(hdev, "CSR: Unbranded CSR clone detected; adding workarounds and force-suspending once...");
++		set_bit(BTUSB_FAKE_CSR, &data->flags);
+ 
+ 		/* Generally these clones have big discrepancies between
+ 		 * advertised features and what's actually supported.
+@@ -2336,6 +2469,15 @@
+ 		set_bit(HCI_QUIRK_BROKEN_FILTER_CLEAR_ALL, &hdev->quirks);
+ 		set_bit(HCI_QUIRK_NO_SUSPEND_NOTIFIER, &hdev->quirks);
+ 
++		/* These clones return undersized command-complete payloads for
++		 * several BR/EDR commands. Intercept them at the transport layer
++		 * and pad the missing byte so the core parser stays in sync.
++		 * (HCI_QUIRK_BROKEN_READ_VOICE_SETTING and _READ_PAGE_SCAN_TYPE
++		 * exist in newer kernels and would skip these commands cleanly,
++		 * but are not present in 6.8.0-94.)
++		 */
++		data->recv_event = btusb_recv_event_csr;
++
+ 		/* Clear the reset quirk since this is not an actual
+ 		 * early Bluetooth 1.1 device from CSR.
+ 		 */
+@@ -2362,23 +2504,61 @@
+ 		 * To fix 2. clear the HCI's can_wake flag, this way the HCI
+ 		 * will still be autosuspended when it is not open.
+ 		 *
++		 * Some clones, however, stop accepting the one-shot forced
++		 * suspend on subsequent init passes once wakeup capability has
++		 * been cleared in software. Leave wakeup capability unchanged
++		 * here and prefer a working init path over the autosuspend tweak.
++		 *
+ 		 * --
+ 		 *
+ 		 * Because these are widespread problems we prefer generic solutions; so
+ 		 * apply this initialization quirk to every controller that gets here,
+ 		 * it should be harmless. The alternative is to not work at all.
+ 		 */
++		btusb_log_csr_pm_state(hdev, data, "before allow", 0);
+ 		pm_runtime_allow(&data->udev->dev);
++		btusb_log_csr_pm_state(hdev, data, "after allow", 0);
+ 
+-		ret = pm_runtime_suspend(&data->udev->dev);
+-		if (ret >= 0)
+-			msleep(200);
+-		else
+-			bt_dev_warn(hdev, "CSR: Couldn't suspend the device for our Barrot 8041a02 receive-issue workaround");
++		/* usb_runtime_suspend() calls autosuspend_check(), which
++		 * refuses to suspend if any interface has needs_remote_wakeup
++		 * set while the device lacks wakeup capability.  btusb_open()
++		 * sets needs_remote_wakeup=1 on data->intf so that normal
++		 * autosuspend is blocked while the HCI is open, but for this
++		 * one-shot init-time suspend we do not need remote wakeup.
++		 * Clear it temporarily so autosuspend_check() passes, then
++		 * restore it immediately.  Use the force variant to also bypass
++		 * the device-level usage_count and child_count checks.
++		 */
++		child_count = atomic_read(&data->udev->dev.power.child_count);
++		btusb_log_csr_pm_state(hdev, data, "pre-suspend", 0);
+ 
+-		pm_runtime_forbid(&data->udev->dev);
++		if (child_count) {
++			bt_dev_warn(hdev,
++				    "CSR: skipping force_suspend while child_count=%d after reset/rebind",
++				    child_count);
++			btusb_log_csr_pm_state(hdev, data, "skip force_suspend", 0);
++		} else {
++			data->intf->needs_remote_wakeup = 0;
++			ret = pm_runtime_force_suspend(&data->udev->dev);
++			data->intf->needs_remote_wakeup = 1;
++
++			btusb_log_csr_pm_state(hdev, data, "after force_suspend", ret);
++
++			if (ret >= 0) {
++				msleep(200);
++				ret = pm_runtime_force_resume(&data->udev->dev);
++				btusb_log_csr_pm_state(hdev, data, "after force_resume", ret);
++			} else {
++				bt_dev_warn(hdev, "CSR: force_suspend failed");
++				btusb_log_csr_pm_state(hdev, data, "force_suspend failed", ret);
++				/* force_suspend disabled runtime PM on failure; undo it */
++				pm_runtime_enable(&data->udev->dev);
++				btusb_log_csr_pm_state(hdev, data, "after re-enable", 0);
++			}
++		}
+ 
+-		device_set_wakeup_capable(&data->udev->dev, false);
++		pm_runtime_forbid(&data->udev->dev);
++		btusb_log_csr_pm_state(hdev, data, "after forbid", 0);
+ 
+ 		/* Re-enable autosuspend if this was requested */
+ 		if (enable_autosuspend)
+@@ -4480,8 +4660,10 @@
+ 
+ 		/* Fake CSR devices with broken commands */
+ 		if (le16_to_cpu(udev->descriptor.idVendor)  == 0x0a12 &&
+-		    le16_to_cpu(udev->descriptor.idProduct) == 0x0001)
++		    le16_to_cpu(udev->descriptor.idProduct) == 0x0001) {
+ 			hdev->setup = btusb_setup_csr;
++			hdev->cmd_timeout = btusb_csr_cmd_timeout;
++		}
+ 	}
+ 
+ 	if (id->driver_info & BTUSB_SNIFFER) {

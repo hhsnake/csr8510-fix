@@ -28,8 +28,8 @@ msg "Installing source to $SRC"
 rm -rf "$SRC"
 mkdir -p "$SRC"
 cp -a "$REPO_DIR"/dkms.conf "$REPO_DIR"/Makefile "$REPO_DIR"/select-variant.sh \
-      "$REPO_DIR"/src "$SRC/"
-chmod +x "$SRC/select-variant.sh"
+      "$REPO_DIR"/post-install.sh "$REPO_DIR"/src "$SRC/"
+chmod +x "$SRC/select-variant.sh" "$SRC/post-install.sh"
 
 # --- (re)register with DKMS ----------------------------------------------
 # Remove any previously registered version of this package so reinstalls

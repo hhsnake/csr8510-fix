@@ -73,7 +73,8 @@ sudo ./uninstall.sh
 | Variant | Used for kernels | Tested on |
 |---|---|---|
 | `src/6.8`  | < 6.11      | 6.8.0-94-generic (Ubuntu 22.04 HWE) |
-| `src/6.11` | 6.11 – 6.16 | 6.11.0-29-generic (Ubuntu 24.04) |
+| `src/6.11` | 6.11 – 6.13 | 6.11.0-29-generic (Ubuntu 24.04) |
+| `src/6.14` | 6.14 – 6.16 | 6.14.0-37-generic (Ubuntu 24.04 HWE) |
 | `src/6.17` | ≥ 6.17      | 6.17.0-35-generic, 7.0.0-14-generic |
 
 The right variant is picked automatically at build time. Untested versions

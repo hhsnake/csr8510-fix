@@ -5,10 +5,13 @@
 #
 # Variants (each is the full patched drivers/bluetooth/btusb.c of that
 # kernel series plus the local headers it includes):
-#   src/6.8   - kernels < 6.11   (tested on 6.8.0-94-generic)
-#   src/6.11  - kernels 6.11..6.16 (tested on 6.11.0-29-generic)
-#   src/6.17  - kernels >= 6.17  (tested on 6.17.0-35-generic and
-#                                 7.0.0-14-generic)
+#   src/6.8   - kernels < 6.11     (tested on 6.8.0-94-generic)
+#   src/6.11  - kernels 6.11..6.13 (tested on 6.11.0-29-generic)
+#   src/6.14  - kernels 6.14..6.16 (tested on 6.14.0-37-generic; these
+#                                   Ubuntu/stable trees backported the
+#                                   quirk_flags API and removed cmd_timeout)
+#   src/6.17  - kernels >= 6.17    (tested on 6.17.0-35-generic and
+#                                   7.0.0-14-generic)
 #
 # Usage: select-variant.sh [kernelver]
 # Runs from the build/source root (DKMS runs PRE_BUILD there).
@@ -31,14 +34,15 @@ esac
 n=$((maj * 100 + min))
 
 if   [ "$n" -ge 617 ]; then variant=6.17
+elif [ "$n" -ge 614 ]; then variant=6.14
 elif [ "$n" -ge 611 ]; then variant=6.11
 else                        variant=6.8
 fi
 
 # Versions the variants were actually built and run against.
 case "$n" in
-    608|611|617|700) tested=yes ;;
-    *)               tested=no  ;;
+    608|611|614|617|700) tested=yes ;;
+    *)                   tested=no  ;;
 esac
 
 echo "btusb-csr: kernel $kv -> source variant src/$variant"

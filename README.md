@@ -43,8 +43,19 @@ Only detected fake devices are affected — real CSR hardware is untouched.
 
 ## Install
 
+### Ubuntu / Debian
+
 ```bash
 sudo apt install dkms linux-headers-$(uname -r)
+git clone https://github.com/hhsnake/csr8510-fix.git
+cd csr8510-fix
+sudo ./install.sh
+```
+
+### Fedora
+
+```bash
+sudo dnf install dkms kernel-devel-$(uname -r)
 git clone https://github.com/hhsnake/csr8510-fix.git
 cd csr8510-fix
 sudo ./install.sh
@@ -73,13 +84,13 @@ sudo ./uninstall.sh
 | Variant | Used for kernels | Tested on |
 |---|---|---|
 | `src/5.15` | < 5.19      | 5.15.0-185-generic (Ubuntu 22.04) |
-| `src/5.19` | 5.19 – 6.1  | 5.19.0-50-generic (Ubuntu 22.04 HWE) |
-| `src/6.2`  | 6.2 – 6.4   | 6.2.0-39-generic (Ubuntu 22.04 HWE) |
-| `src/6.5`  | 6.5 – 6.7   | 6.5.0-45-generic (Ubuntu 22.04 HWE) |
-| `src/6.8`  | 6.8 – 6.10  | 6.8.0-94, 6.8.0-134-generic (Ubuntu 22.04 HWE) |
+| `src/5.19` | 5.19 – 6.1  | 5.19.0-50-generic (Ubuntu 22.04) |
+| `src/6.2`  | 6.2 – 6.4   | 6.2.0-39-generic (Ubuntu 22.04) |
+| `src/6.5`  | 6.5 – 6.7   | 6.5.0-45-generic (Ubuntu 22.04) |
+| `src/6.8`  | 6.8 – 6.10  | 6.8.0-94, 6.8.0-134-generic (Ubuntu 22.04) |
 | `src/6.11` | 6.11 – 6.13 | 6.11.0-29-generic (Ubuntu 24.04) |
-| `src/6.14` | 6.14 – 6.16 | 6.14.0-37-generic (Ubuntu 24.04 HWE) |
-| `src/6.17` | ≥ 6.17      | 6.17.0-35-generic, 7.0.0-14-generic |
+| `src/6.14` | 6.14 – 6.16 | 6.14.0-37-generic (Ubuntu 24.04) |
+| `src/6.17` | ≥ 6.17      | 6.17.0-35-generic, 7.0.0-14-generic (Ubuntu 24.04); 6.19, 7.1 (Fedora Workstation 44) |
 
 The right variant is picked automatically at build time. Untested versions
 in between get the nearest variant and usually build fine; if the build

@@ -4691,11 +4691,16 @@ static int btusb_probe(struct usb_interface *intf,
 		set_bit(HCI_QUIRK_WIDEBAND_SPEECH_SUPPORTED, &hdev->quirks);
 
 	/* VALID_LE_STATES was inverted to BROKEN_LE_STATES in 6.11 (valid is now
-	 * the default); downstream 6.8 kernels backported that. On kernels
-	 * without the old quirk, valid-by-default gives the same result. */
+	 * the default), and downstream 6.8 kernels (Ubuntu HWE) backported that.
+	 * Old kernels: flag the known-good devices valid. New kernels: flag the
+	 * rest (e.g. fake CSR clones) broken -- omitting this leaves them wrongly
+	 * treated as valid and LE breaks. */
 #ifdef HAVE_HCI_QUIRK_VALID_LE_STATES
 	if (id->driver_info & BTUSB_VALID_LE_STATES)
 		set_bit(HCI_QUIRK_VALID_LE_STATES, &hdev->quirks);
+#else
+	if (!(id->driver_info & BTUSB_VALID_LE_STATES))
+		set_bit(HCI_QUIRK_BROKEN_LE_STATES, &hdev->quirks);
 #endif
 
 	if (id->driver_info & BTUSB_DIGIANSWER) {

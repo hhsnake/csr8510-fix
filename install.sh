@@ -32,22 +32,23 @@ cp -a "$REPO_DIR"/dkms.conf "$REPO_DIR"/Makefile "$REPO_DIR"/select-variant.sh \
 chmod +x "$SRC/select-variant.sh" "$SRC/post-install.sh"
 
 # --- (re)register with DKMS ----------------------------------------------
-# Remove any previously registered version of this package so reinstalls
-# and upgrades are clean.
-EXISTING=$(dkms status "$PACKAGE" 2>/dev/null | \
+# Only ever touch the CURRENT kernel; builds already installed for other
+# kernels must be left alone. Remove just this kernel's existing build (any
+# version) so the rebuild is clean, then (re)build for $KVER only.
+EXISTING=$(dkms status "$PACKAGE" -k "$KVER" 2>/dev/null | \
            sed -n "s|^$PACKAGE[/,] *\([^,: ]*\).*|\1|p" | sort -u)
-if [ -n "$EXISTING" ]; then
-    msg "Removing previously registered $PACKAGE versions"
-    for oldver in $EXISTING; do
-        dkms remove -m "$PACKAGE" -v "$oldver" --all || true
-    done
-fi
+for oldver in $EXISTING; do
+    msg "Removing existing $PACKAGE/$oldver build for kernel $KVER"
+    dkms remove -m "$PACKAGE" -v "$oldver" -k "$KVER" || true
+done
 
 msg "Registering and building $PACKAGE/$VERSION for kernel $KVER"
-dkms add -m "$PACKAGE" -v "$VERSION"
-dkms build -m "$PACKAGE" -v "$VERSION" || \
+# add is a no-op (and harmlessly errors) if the version is already registered
+# from another kernel's install; the source in /usr/src was refreshed above.
+dkms add -m "$PACKAGE" -v "$VERSION" 2>/dev/null || true
+dkms build -m "$PACKAGE" -v "$VERSION" -k "$KVER" || \
     die "build failed - see /var/lib/dkms/$PACKAGE/$VERSION/build/make.log"
-dkms install -m "$PACKAGE" -v "$VERSION" --force
+dkms install -m "$PACKAGE" -v "$VERSION" -k "$KVER" --force
 
 # --- verify the module actually landed in updates/dkms --------------------
 # Older DKMS versions (e.g. 2.8.x) have occasionally been seen not to place

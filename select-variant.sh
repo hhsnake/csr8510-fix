@@ -10,12 +10,14 @@
 #   src/6.2   - kernels 6.2..6.4   (tested on 6.2.0-39-generic)
 #   src/6.5   - kernels 6.5..6.7   (tested on 6.5.0-45-generic)
 #   src/6.8   - kernels 6.8..6.10  (tested on 6.8.0-94/134-generic)
-#   src/6.11  - kernels 6.11..6.13 (tested on 6.11.0-29-generic)
+#   src/6.11  - kernels 6.11..6.13 (tested on 6.11.0-29-generic;
+#                                   6.11.4-301.fc41)
 #   src/6.14  - kernels 6.14..6.16 (tested on 6.14.0-37-generic; these
 #                                   Ubuntu/stable trees backported the
 #                                   quirk_flags API and removed cmd_timeout)
-#   src/6.17  - kernels >= 6.17    (tested on 6.17.0-35-generic and
-#                                   7.0.0-14-generic)
+#   src/6.17  - kernels >= 6.17    (tested on 6.17.0-35-generic,
+#                                   7.0.0-14-generic; 6.17.10-100.fc41,
+#                                   6.19.10-300.fc44, 7.1.4-200.fc44)
 #
 # Usage: select-variant.sh [kernelver]
 # Runs from the build/source root (DKMS runs PRE_BUILD there).
@@ -49,8 +51,8 @@ fi
 
 # Versions the variants were actually built and run against.
 case "$n" in
-    515|519|602|605|608|611|614|617|700) tested=yes ;;
-    *)                                   tested=no  ;;
+    515|519|602|605|608|611|614|617|619|700|701) tested=yes ;;
+    *)                                            tested=no  ;;
 esac
 
 echo "csr8510-fix: kernel $kv -> source variant src/$variant"

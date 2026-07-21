@@ -1,0 +1,31 @@
+# Provenance manifest — src/6.17 is a GENERATED artifact, do not edit by hand.
+#
+#   src/6.17/  =  pristine kernel files @ <commit>  +  patches/csr8510-fix-6.17.patch
+#
+# The trust anchor is the sha256 of each file's content, NOT the download URL.
+# Any mirror serving the same bytes is acceptable; tools/regen.sh verifies the
+# hash before use and tools/verify.sh proves src/6.17 equals the result. This
+# is what lets a reviewer confirm nothing was slipped into the vendored source.
+
+variant  6.17
+tag      v6.17
+commit   e5f0a698b34ed76002dc5cff3804a61c80233a7a
+patch    patches/csr8510-fix-6.17.patch
+
+# Download mirrors (raw bytes), tried in order. {commit} and {path} substituted.
+# Release tags never move and are mirrored widely; if all mirrors are gone, a
+# local clone still works:  KERNEL_GIT=/path/to/linux.git tools/regen.sh 6.17
+mirror   https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/{path}?id={commit}
+mirror   https://raw.githubusercontent.com/torvalds/linux/{commit}/{path}
+
+# file  <sha256>  <path-in-kernel-tree>  <dest-in-src>  <apply-patch?>
+file  a7b322a62b4cf3bcf8191c80aa70fa1ae64679591a253466163bb4990af912a6  drivers/bluetooth/btusb.c        btusb.c        yes
+file  43ab94feac41161ff6adca55002b5494117da72b968a41c972144d92b51d574e  drivers/bluetooth/btbcm.h        btbcm.h        no
+file  bef8c2e0c150aae6349a159a95a72aab3d995615bb2d1cae49bedad35ff4b5e1  drivers/bluetooth/btintel.h      btintel.h      no
+file  0b594459efebc49b920d7c59c34cd6e10ff21ad4d4cda5026ac42fc1c2fec098  drivers/bluetooth/btmrvl_drv.h   btmrvl_drv.h   no
+file  df6f012feca029448cdb882f08a2aebff1413ada2ba6e5cd41136190c09f8b7c  drivers/bluetooth/btmrvl_sdio.h  btmrvl_sdio.h  no
+file  4b5d3781d0d8e47e3282c53564e83892793bb4a18c5ca318e821220316bcd9f3  drivers/bluetooth/btmtk.h        btmtk.h        no
+file  075eeaf78e4a9288ae228c0f99edbd137fcbd87c2645872cf748a9a33752205e  drivers/bluetooth/btqca.h        btqca.h        no
+file  452d4467259f1da92f0f71bb566499f1fa0e1c89ec4f5bf7412ba8c5489daaa1  drivers/bluetooth/btrtl.h        btrtl.h        no
+file  235713465861d04ec6c3621d596fa50dddaaebbfe78d38fe7362622ddfa27f14  drivers/bluetooth/h4_recv.h      h4_recv.h      no
+file  09634c06a54161ff6671d0dcc5f27da90719f96dc82c6ac999a5dd6b81e67cab  drivers/bluetooth/hci_uart.h     hci_uart.h     no

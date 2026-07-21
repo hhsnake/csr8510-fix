@@ -20,15 +20,16 @@ DEST=${2:-$ROOT/src/$V}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-fetch() { # $1=kernel path -> file content on stdout
-    local path=$1 url out
+fetch() { # $1=kernel path, $2=dest file. Writes bytes verbatim (never via $(...),
+          # which would strip the file's trailing newline and change its hash).
+    local path=$1 dest=$2 url
     if [ -n "${KERNEL_GIT:-}" ] && \
        git -C "$KERNEL_GIT" cat-file -e "$commit:$path" 2>/dev/null; then
-        git -C "$KERNEL_GIT" show "$commit:$path"; return 0
+        git -C "$KERNEL_GIT" show "$commit:$path" > "$dest"; return 0
     fi
     for m in "${mirrors[@]}"; do
         url=${m//\{commit\}/$commit}; url=${url//\{path\}/$path}
-        if out=$(curl -fsSL "$url" 2>/dev/null); then printf '%s' "$out"; return 0; fi
+        if curl -fsSL "$url" -o "$dest" 2>/dev/null; then return 0; fi
     done
     return 1
 }
@@ -36,7 +37,7 @@ fetch() { # $1=kernel path -> file content on stdout
 mkdir -p "$DEST"
 while read -r _ sha path dest apply; do
     [ -n "${sha:-}" ] || continue
-    fetch "$path" > "$work/$dest" || { echo "fetch failed: $path" >&2; exit 1; }
+    fetch "$path" "$work/$dest" || { echo "fetch failed: $path" >&2; exit 1; }
     got=$(sha256sum "$work/$dest" | cut -d' ' -f1)
     [ "$got" = "$sha" ] || {
         echo "sha256 mismatch for $path" >&2

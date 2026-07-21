@@ -4,13 +4,14 @@ ifneq ($(KERNELRELEASE),)
 
 obj-m := btusb.o
 
-# Downstream kernels (e.g. Ubuntu) backport HCI quirks that same-version
-# vanilla kernels (e.g. Fedora) lack. The ACTIONS_SEMI block in btusb.c uses a
-# couple of them; enable those set_bit() calls only when the enum actually
-# exists in this kernel's headers.
+# Distro kernels (e.g. Ubuntu HWE) backport later HCI API changes into an older
+# release, so a symbol's presence can't be inferred from the kernel version.
+# Probe the target kernel's headers and let src/*/btusb.c #ifdef on the result.
+# HCI_PRIMARY (with dev_type/HCI_AMP) was removed in 6.10; HCI_QUIRK_VALID_LE_STATES
+# was inverted to HCI_QUIRK_BROKEN_LE_STATES in 6.11.
 _hci_h := $(srctree)/include/net/bluetooth/hci.h
-ccflags-$(shell grep -qw HCI_QUIRK_BROKEN_EXT_CREATE_CONN $(_hci_h) 2>/dev/null && echo y) += -DHAVE_HCI_QUIRK_BROKEN_EXT_CREATE_CONN
-ccflags-$(shell grep -qw HCI_QUIRK_BROKEN_WRITE_AUTH_PAYLOAD_TIMEOUT $(_hci_h) 2>/dev/null && echo y) += -DHAVE_HCI_QUIRK_BROKEN_WRITE_AUTH_PAYLOAD_TIMEOUT
+ccflags-$(shell grep -qw HCI_PRIMARY $(_hci_h) 2>/dev/null && echo y) += -DHAVE_HCI_PRIMARY
+ccflags-$(shell grep -qw HCI_QUIRK_VALID_LE_STATES $(_hci_h) 2>/dev/null && echo y) += -DHAVE_HCI_QUIRK_VALID_LE_STATES
 
 # Convenience part: "make" in the repo root builds the module for the
 # running kernel without DKMS (for a quick one-off test).

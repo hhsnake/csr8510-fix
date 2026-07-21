@@ -1,7 +1,7 @@
 diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
 --- a/drivers/bluetooth/btusb.c
 +++ b/drivers/bluetooth/btusb.c
-@@ -885,6 +885,8 @@
+@@ -794,6 +794,8 @@
  #define BTUSB_USE_ALT3_FOR_WBS	15
  #define BTUSB_ALT6_CONTINUOUS_TX	16
  #define BTUSB_HW_SSR_ACTIVE	17
@@ -10,7 +10,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  
  struct btusb_data {
  	struct hci_dev       *hdev;
-@@ -1105,6 +1107,58 @@
+@@ -1010,6 +1012,58 @@
  	btusb_rtl_alloc_devcoredump(hdev, &hdr, NULL, 0);
  }
  
@@ -69,7 +69,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  static void btusb_qca_cmd_timeout(struct hci_dev *hdev)
  {
  	struct btusb_data *data = hci_get_drvdata(hdev);
-@@ -1412,6 +1466,10 @@
+@@ -1305,6 +1359,10 @@
  	if (urb->status == 0) {
  		hdev->stat.byte_rx += urb->actual_length;
  
@@ -80,7 +80,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  		if (btusb_recv_intr(data, urb->transfer_buffer,
  				    urb->actual_length) < 0) {
  			bt_dev_err(hdev, "corrupted event packet");
-@@ -1926,6 +1984,8 @@
+@@ -1811,6 +1869,8 @@
  	if (err < 0)
  		return err;
  
@@ -89,7 +89,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	/* Patching USB firmware files prior to starting any URBs of HCI path
  	 * It is more safe to use USB bulk channel for downloading USB patch
  	 */
-@@ -1999,6 +2059,8 @@
+@@ -1884,6 +1944,8 @@
  	btusb_stop_traffic(data);
  	btusb_free_frags(data);
  
@@ -98,7 +98,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	err = usb_autopm_get_interface(data->intf);
  	if (err < 0)
  		goto failed;
-@@ -2424,6 +2486,68 @@
+@@ -2309,6 +2371,68 @@
  	return 0;
  }
  
@@ -167,7 +167,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  static int btusb_setup_csr(struct hci_dev *hdev)
  {
  	struct btusb_data *data = hci_get_drvdata(hdev);
-@@ -2438,9 +2562,15 @@
+@@ -2323,9 +2447,15 @@
  	skb = __hci_cmd_sync(hdev, HCI_OP_READ_LOCAL_VERSION, 0, NULL,
  			     HCI_INIT_TIMEOUT);
  	if (IS_ERR(skb)) {
@@ -186,7 +186,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	rp = skb_pull_data(skb, sizeof(*rp));
-@@ -2511,7 +2641,10 @@
+@@ -2396,7 +2526,10 @@
  		is_fake = true;
  
  	if (is_fake) {
@@ -197,7 +197,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  
  		/* Generally these clones have big discrepancies between
  		 * advertised features and what's actually supported.
-@@ -2523,6 +2656,15 @@
+@@ -2408,6 +2541,15 @@
  		set_bit(HCI_QUIRK_BROKEN_FILTER_CLEAR_ALL, &hdev->quirks);
  		set_bit(HCI_QUIRK_NO_SUSPEND_NOTIFIER, &hdev->quirks);
  
@@ -213,7 +213,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  		/* Clear the reset quirk since this is not an actual
  		 * early Bluetooth 1.1 device from CSR.
  		 */
-@@ -2549,23 +2691,69 @@
+@@ -2434,23 +2576,69 @@
  		 * To fix 2. clear the HCI's can_wake flag, this way the HCI
  		 * will still be autosuspended when it is not open.
  		 *
@@ -268,7 +268,8 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
 +				ret = pm_runtime_force_suspend(&data->udev->dev);
 +			}
 +			data->intf->needs_remote_wakeup = 1;
-+
+ 
+-		device_set_wakeup_capable(&data->udev->dev, false);
 +			btusb_log_csr_pm_state(hdev, data, "after force_suspend", ret);
 +
 +			if (ret >= 0) {
@@ -283,14 +284,43 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
 +				bt_dev_warn(hdev, "CSR: force_suspend failed; skipping one-shot suspend");
 +			}
 +		}
- 
--		device_set_wakeup_capable(&data->udev->dev, false);
++
 +		pm_runtime_forbid(&data->udev->dev);
 +		btusb_log_csr_pm_state(hdev, data, "after forbid", 0);
  
  		/* Re-enable autosuspend if this was requested */
  		if (enable_autosuspend)
-@@ -4709,8 +4897,10 @@
+@@ -4311,10 +4499,15 @@
+ 	hdev->bus = HCI_USB;
+ 	hci_set_drvdata(hdev, data);
+ 
++	/* dev_type/HCI_AMP/HCI_PRIMARY were removed with AMP in 6.10; downstream
++	 * kernels (e.g. Ubuntu HWE 6.8) backported that removal. Only touch
++	 * dev_type on kernels that still have it. */
++#ifdef HAVE_HCI_PRIMARY
+ 	if (id->driver_info & BTUSB_AMP)
+ 		hdev->dev_type = HCI_AMP;
+ 	else
+ 		hdev->dev_type = HCI_PRIMARY;
++#endif
+ 
+ 	data->hdev = hdev;
+ 
+@@ -4497,8 +4690,13 @@
+ 	if (id->driver_info & BTUSB_WIDEBAND_SPEECH)
+ 		set_bit(HCI_QUIRK_WIDEBAND_SPEECH_SUPPORTED, &hdev->quirks);
+ 
++	/* VALID_LE_STATES was inverted to BROKEN_LE_STATES in 6.11 (valid is now
++	 * the default); downstream 6.8 kernels backported that. On kernels
++	 * without the old quirk, valid-by-default gives the same result. */
++#ifdef HAVE_HCI_QUIRK_VALID_LE_STATES
+ 	if (id->driver_info & BTUSB_VALID_LE_STATES)
+ 		set_bit(HCI_QUIRK_VALID_LE_STATES, &hdev->quirks);
++#endif
+ 
+ 	if (id->driver_info & BTUSB_DIGIANSWER) {
+ 		data->cmdreq_type = USB_TYPE_VENDOR;
+@@ -4518,8 +4716,10 @@
  
  		/* Fake CSR devices with broken commands */
  		if (le16_to_cpu(udev->descriptor.idVendor)  == 0x0a12 &&

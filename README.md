@@ -20,6 +20,8 @@ and Bluetooth fails with any of:
 ```
 Bluetooth: hci0: CSR: Local version failed (-32)
 Bluetooth: hci0: command 0x1001 tx timeout
+Bluetooth: hci0: Opcode 0x0c03 failed: -110
+or
 Bluetooth: hci0: Opcode 0x0c25 failed: -110
 Can't init device hci0: Connection timed out (110)
 ```
@@ -36,8 +38,9 @@ enough for this hardware. This patch additionally:
   0x0c25, `Read Transmit Power Level` 0x0c2d, `Read Page Scan Type` 0x0c46)
   so HCI init survives;
 * fixes the fragile USB runtime-PM suspend workaround;
-* auto-recovers from init failures and command timeouts with a USB reset
-  instead of leaving the controller stuck.
+* auto-recovers with a USB reset from init failures and command timeouts,
+  including a dongle that answers nothing at all — not even the very first
+  `Reset` (0x0c03) — instead of leaving the controller stuck.
 
 Only detected fake devices are affected — real CSR hardware is untouched.
 

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CSR8510 A10 fake clone Bluetooth fix for Linux (0a12:0001) — csr8510-fix</title>
-<meta name="description" content="Fix for fake CSR8510 A10 / Barrot 8041a02 Bluetooth dongle clones (0a12:0001) on Linux. Patched btusb driver packaged as DKMS. Solves 'Opcode 0x0c03 failed: -110', 'command 0x1001 tx timeout' and 'Can't init device hci0'. Kernels 5.15-7.1+.">
+<meta name="description" content="Fix for fake CSR8510 A10 / Barrot 8041a02 Bluetooth dongle clones (0a12:0001) on Linux. Patched btusb driver packaged as DKMS. Solves 'Opcode 0x0c03 failed: -110', 'command 0x1001 tx timeout' and 'Can't init device hci0', and a dongle that connects but never finds any device. Kernels 5.15-7.1+. Ubuntu, Debian, Fedora, Arch, CachyOS, SteamOS.">
 <link rel="canonical" href="https://hhsnake.github.io/csr8510-fix/">
 <meta property="og:type" content="website">
 <meta property="og:title" content="CSR8510 A10 fake clone Bluetooth fix for Linux (0a12:0001)">
@@ -55,7 +55,7 @@ li{margin:.3rem 0}
 <h1>CSR8510 A10 fake clone Bluetooth fix for Linux</h1>
 <p class="lede">Patched <code>btusb</code> driver for fake CSR8510 A10 / Barrot 8041a02
 USB Bluetooth dongles (<code>0a12:0001</code>), packaged as DKMS.
-Kernels 5.15 – 7.1+. Ubuntu, Debian, Fedora, Arch, CachyOS.</p>
+Kernels 5.15 – 7.1+. Ubuntu, Debian, Fedora, Arch, CachyOS, SteamOS.</p>
 <a class="cta" href="https://github.com/hhsnake/csr8510-fix">View on GitHub →</a>
 </header>
 
@@ -78,6 +78,12 @@ Can't init device hci0: Connection timed out (110)</code></pre>
 the adapter disappears from GNOME/KDE settings, or <code>hciconfig hci0 up</code>
 times out.</p>
 
+<p>There is also a quieter failure with no error in the usual places: the
+adapter comes up looking perfectly healthy, but the Bluetooth panel of your
+desktop never finds a single device — while <code>bluetoothctl scan on</code>
+in a terminal finds them straight away. See
+<a href="#le">Advertised LE that does not work</a>.</p>
+
 <h2>Why it happens</h2>
 <p>These are cheap clone chips (Barrot 8041a02 and similar) sold as
 “Bluetooth 5.0/5.1/5.3 USB adapter” — ORICO BTA-403, Орбита OT-PCB13 and
@@ -95,7 +101,9 @@ Read Page Scan Type <code>0x0c46</code> — so HCI init survives;</li>
 <li>fixes the fragile USB runtime-PM force-suspend workaround;</li>
 <li>auto-recovers with a USB reset from init failures and command timeouts,
 including a dongle that answers nothing at all — not even the very first
-Reset (<code>0x0c03</code>) — instead of leaving the controller stuck.</li>
+Reset (<code>0x0c03</code>) — instead of leaving the controller stuck;</li>
+<li>hides the Bluetooth LE support these clones advertise but never implement,
+so desktop Bluetooth stacks stop aborting discovery on the LE half.</li>
 </ul>
 <p>Only detected fake devices are affected. Real CSR hardware is untouched.</p>
 
@@ -128,6 +136,31 @@ git clone https://github.com/hhsnake/csr8510-fix.git
 cd csr8510-fix
 sudo ./install.sh</code></pre>
 
+<h3>SteamOS</h3>
+<p>The root filesystem is read-only and ships without a package database, so it
+has to be opened up first. The kernel is taken along with its headers on
+purpose: SteamOS images usually run one revision behind the only headers the
+repository carries, and DKMS refuses to build until the two match.</p>
+<pre><code>sudo steamos-readonly disable
+sudo pacman-key --init
+sudo pacman-key --populate
+sudo pacman -Sy
+
+K=$(pacman -Qoq /usr/lib/modules/$(uname -r)/vmlinuz)
+sudo pacman -S --needed git dkms gcc make bc bluez bluez-utils "$K" "$K-headers"
+sudo systemctl enable --now bluetooth
+sudo reboot</code></pre>
+<p>After the reboot:</p>
+<pre><code>git clone https://github.com/hhsnake/csr8510-fix.git
+cd csr8510-fix
+sudo ./install.sh</code></pre>
+<p><strong>SteamOS updates remove the module.</strong> The system updates by
+replacing the whole root image (A/B slots), so <code>/usr/lib/modules</code>,
+<code>/usr/src</code> and the <code>steamos-readonly disable</code> state are all
+reset. Re-run <code>install.sh</code> after each system update, or keep the built
+<code>.ko</code> on <code>/home</code> — that partition survives updates — and
+load it from a systemd unit.</p>
+
 <p>The module is installed to <code>/lib/modules/&lt;ver&gt;/updates/dkms/</code>,
 which takes precedence over the stock module — nothing in the kernel is
 overwritten — and DKMS rebuilds it automatically on every kernel update.</p>
@@ -150,7 +183,7 @@ journalctl -kf | grep -iE 'bluetooth|csr'    # then plug in the dongle</code></p
 <tr><td><code>src/6.5</code></td><td>6.5 – 6.7</td><td>6.5.0-45-generic (Ubuntu 22.04)</td></tr>
 <tr><td><code>src/6.8</code></td><td>6.8 – 6.10</td><td>6.8.0-94, 6.8.0-134-generic (Ubuntu 22.04)</td></tr>
 <tr><td><code>src/6.11</code></td><td>6.11 – 6.13</td><td>6.11.0-29-generic (Ubuntu 24.04); 6.11.4-301.fc41</td></tr>
-<tr><td><code>src/6.14</code></td><td>6.14 – 6.16</td><td>6.14.0-37-generic (Ubuntu 24.04)</td></tr>
+<tr><td><code>src/6.14</code></td><td>6.14 – 6.16</td><td>6.14.0-37-generic (Ubuntu 24.04); 6.16.12-valve24.5-1-neptune-616 (SteamOS 3.8.14)</td></tr>
 <tr><td><code>src/6.17</code></td><td>≥ 6.17</td><td>6.17.0-35, 7.0.0-14-generic (Ubuntu 24.04); 6.17.10-100.fc41; 6.19.10-300.fc44, 7.1.4-200.fc44; 7.1.4-arch1-1, 6.18.39-1-lts, 7.1.4-zen1-1 (Arch); 7.1.8-1-cachyos</td></tr>
 </tbody>
 </table>
@@ -162,8 +195,38 @@ journalctl -kf | grep -iE 'bluetooth|csr'    # then plug in the dongle</code></p
 <pre><code>cd linux-&lt;version&gt;
 patch -p1 &lt; .../patches/csr8510-fix-6.17.patch</code></pre>
 
+<h2 id="le">Advertised LE that does not work</h2>
+<p>These clones report Bluetooth LE in their local features and then fail every
+LE command:</p>
+<pre class="err"><code>Bluetooth: hci0: Opcode 0x2005 failed: -32     # LE Set Random Address
+Bluetooth: hci0: Opcode 0x200b failed: -32     # LE Set Scan Parameters</code></pre>
+<p>Desktop Bluetooth stacks start discovery in dual mode, so the failing LE half
+aborts the whole scan and nothing is ever found — while
+<code>bluetoothctl scan on</code> still works, because it falls back to BR/EDR.
+Nothing looks broken: <code>hciconfig</code> shows <code>UP RUNNING</code> with a
+valid BD address. That combination makes the fault read as a desktop bug rather
+than a controller one.</p>
+<p>Already-paired devices keep connecting normally, because that path does not
+involve discovery — which is why this is easy to miss until you try to add a new
+device.</p>
+<p>The driver clears the LE feature bits for these clones while the
+<em>Read Local Features</em> response is still in flight, so the core brings the
+controller up as BR/EDR-only and never sends an LE command. Nothing usable is
+lost: the LE this hides was never functional. Only devices matching
+<code>0a12:0001</code> <strong>and</strong> detected as fake are affected — other
+adapters in the same machine keep full LE support.</p>
+<p>To keep the advertised LE, for instance to test a clone whose LE does work:</p>
+<pre><code># /etc/modprobe.d/csr8510-fix.conf
+options btusb csr_disable_le=0</code></pre>
+
 <h2>Troubleshooting</h2>
 <ul>
+<li><strong>Nothing is found after installing, although the adapter looks
+fine</strong> — reloading the module (which <code>install.sh</code> does at the
+end) rebinds the driver without re-enumerating the device, so the receive-issue
+workaround is skipped. <strong>Unplug the dongle and plug it back in.</strong>
+A USB reset or <code>systemctl restart bluetooth</code> is not enough: the
+controller ignores an in-band Reset (<code>0x0c03</code>).</li>
 <li><strong>Secure Boot</strong> — the module is signed automatically if DKMS MOK
 signing is set up; otherwise enroll a key (<code>man mokutil</code>) or disable
 Secure Boot.</li>
@@ -176,12 +239,17 @@ unsigned.</li>
 
 <h2>По-русски</h2>
 <p>Не работает Bluetooth-адаптер <code>0a12:0001</code> «CSR8510 A10» в Linux —
-Ubuntu, Debian, Fedora, Arch, CachyOS? Это дешёвый клон на чипе Barrot 8041a02,
+Ubuntu, Debian, Fedora, Arch, CachyOS, SteamOS? Это дешёвый клон на чипе Barrot 8041a02,
 который продаётся как «Bluetooth 5.0 USB адаптер» (ORICO BTA-403,
 Орбита OT-PCB13 и безымянные донглы с AliExpress). В Windows он работает,
 в Linux — нет: <code>bluetoothctl</code> пишет «No default controller available»,
 а в <code>dmesg</code> видно <code>Opcode 0x0c03 failed: -110</code> или
 <code>command 0x1001 tx timeout</code>.</p>
+<p>Бывает и тише: адаптер поднимается как ни в чём не бывало, но поиск устройств
+из настроек рабочего стола не находит ничего, хотя <code>bluetoothctl scan on</code>
+в терминале находит сразу. Это тот же клон — он заявляет поддержку LE, которой
+у него нет. Подробности в разделе
+<a href="#le">Advertised LE that does not work</a>.</p>
 <p>Решение — исправленный драйвер <code>btusb</code>, собираемый через DKMS
 (пересобирается сам при обновлении ядра, штатный модуль не затирается).
 Команды установки — в разделе <a href="#install">Install</a> выше;

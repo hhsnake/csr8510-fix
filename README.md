@@ -74,6 +74,17 @@ cd csr8510-fix
 sudo ./install.sh
 ```
 
+### CachyOS
+
+```bash
+sudo pacman -S --needed git dkms bluez bluez-utils \
+  "$(pacman -Qoq /usr/lib/modules/$(uname -r)/vmlinuz)-headers"
+sudo systemctl enable --now bluetooth
+git clone https://github.com/hhsnake/csr8510-fix.git
+cd csr8510-fix
+sudo ./install.sh
+```
+
 The module is installed to `/lib/modules/<ver>/updates/dkms/` (takes
 precedence over the stock module, nothing in the kernel is overwritten)
 and rebuilt automatically by DKMS on every kernel update.
@@ -103,7 +114,7 @@ sudo ./uninstall.sh
 | `src/6.8`  | 6.8 – 6.10  | 6.8.0-94, 6.8.0-134-generic (Ubuntu 22.04) |
 | `src/6.11` | 6.11 – 6.13 | 6.11.0-29-generic (Ubuntu 24.04); 6.11.4-301.fc41 (Fedora 41) |
 | `src/6.14` | 6.14 – 6.16 | 6.14.0-37-generic (Ubuntu 24.04) |
-| `src/6.17` | ≥ 6.17      | 6.17.0-35-generic, 7.0.0-14-generic (Ubuntu 24.04); 6.17.10-100.fc41 (Fedora 41); 6.19.10-300.fc44, 7.1.4-200.fc44 (Fedora 44); 7.1.4-arch1-1, 6.18.39-1-lts, 7.1.4-zen1-1 (Arch) |
+| `src/6.17` | ≥ 6.17      | 6.17.0-35-generic, 7.0.0-14-generic (Ubuntu 24.04); 6.17.10-100.fc41 (Fedora 41); 6.19.10-300.fc44, 7.1.4-200.fc44 (Fedora 44); 7.1.4-arch1-1, 6.18.39-1-lts, 7.1.4-zen1-1 (Arch), 7.1.8-1-cachyos |
 
 The right variant is picked automatically at build time. Untested versions
 in between get the nearest variant and usually build fine; if the build

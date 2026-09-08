@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CSR8510 A10 fake clone Bluetooth fix for Linux (0a12:0001) — csr8510-fix</title>
+<meta name="description" content="Fix for fake CSR8510 A10 / Barrot 8041a02 Bluetooth dongle clones (0a12:0001) on Linux. Patched btusb driver packaged as DKMS. Solves 'Opcode 0x0c03 failed: -110', 'command 0x1001 tx timeout' and 'Can't init device hci0'. Kernels 5.15-7.1+.">
+<link rel="canonical" href="https://hhsnake.github.io/csr8510-fix/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="CSR8510 A10 fake clone Bluetooth fix for Linux (0a12:0001)">
+<meta property="og:description" content="Patched btusb driver as DKMS for fake CSR8510 A10 / Barrot 8041a02 clones. Kernels 5.15-7.1+.">
+<meta property="og:url" content="https://hhsnake.github.io/csr8510-fix/">
+<style>
+:root{
+  --bg:#fbfaf8; --fg:#1b1a18; --muted:#5d5b57; --rule:#e2ded7;
+  --card:#ffffff; --code-bg:#f2efe9; --accent:#8a4b1e; --warn:#8a1e1e;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#161513; --fg:#eae7e1; --muted:#a29e96; --rule:#312e2a;
+    --card:#1e1c1a; --code-bg:#232120; --accent:#e0a06a; --warn:#e08a8a;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+.wrap{max-width:52rem;margin:0 auto;padding:2.5rem 1.25rem 5rem}
+header{border-bottom:1px solid var(--rule);padding-bottom:1.5rem;margin-bottom:2rem}
+h1{font-size:1.9rem;line-height:1.25;margin:0 0 .5rem;letter-spacing:-.02em}
+h2{font-size:1.3rem;margin:2.5rem 0 .75rem;letter-spacing:-.01em}
+h3{font-size:1rem;margin:1.5rem 0 .5rem;color:var(--muted);font-weight:600}
+.lede{color:var(--muted);font-size:1.05rem;margin:0}
+a{color:var(--accent)}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.875rem}
+code{background:var(--code-bg);padding:.12em .35em;border-radius:3px}
+pre{background:var(--code-bg);padding:.9rem 1rem;border-radius:6px;overflow-x:auto;
+  border:1px solid var(--rule)}
+pre code{background:none;padding:0}
+.err{border-left:3px solid var(--warn)}
+table{border-collapse:collapse;width:100%;font-size:.9rem;display:block;overflow-x:auto}
+th,td{text-align:left;padding:.5rem .7rem;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.04em}
+.cta{display:inline-block;margin-top:1rem;padding:.6rem 1.1rem;background:var(--card);
+  border:1px solid var(--rule);border-radius:6px;text-decoration:none;font-weight:600}
+footer{margin-top:4rem;padding-top:1.5rem;border-top:1px solid var(--rule);
+  color:var(--muted);font-size:.875rem}
+ul{padding-left:1.2rem}
+li{margin:.3rem 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+<h1>CSR8510 A10 fake clone Bluetooth fix for Linux</h1>
+<p class="lede">Patched <code>btusb</code> driver for fake CSR8510 A10 / Barrot 8041a02
+USB Bluetooth dongles (<code>0a12:0001</code>), packaged as DKMS.
+Kernels 5.15 – 7.1+. Ubuntu, Debian, Fedora, Arch, CachyOS.</p>
+<a class="cta" href="https://github.com/hhsnake/csr8510-fix">View on GitHub →</a>
+</header>
+
+<h2>Is this your device?</h2>
+<p>You are in the right place if <code>lsusb</code> and <code>dmesg</code> show:</p>
+<pre><code>ID 0a12:0001 Cambridge Silicon Radio, Ltd Bluetooth Dongle (HCI mode)
+usb: Product: CSR8510 A10, idVendor=0a12, idProduct=0001, bcdDevice=25.20
+Bluetooth: hci0: CSR: Setting up dongle with HCI ver=9 rev=3120
+Bluetooth: hci0: LMP ver=9 subver=22bb; manufacturer=10</code></pre>
+
+<h3>and Bluetooth fails with any of these errors</h3>
+<pre class="err"><code>Bluetooth: hci0: Opcode 0x0c03 failed: -110
+Bluetooth: hci0: command 0x1001 tx timeout
+Bluetooth: hci0: CSR: Local version failed (-32)
+Bluetooth: hci0: Opcode 0x0c25 failed: -110
+Can't init device hci0: Connection timed out (110)</code></pre>
+
+<p>Typical symptoms: <strong>the dongle works on Windows but not on Linux</strong>,
+<code>bluetoothctl show</code> prints “No default controller available”,
+the adapter disappears from GNOME/KDE settings, or <code>hciconfig hci0 up</code>
+times out.</p>
+
+<h2>Why it happens</h2>
+<p>These are cheap clone chips (Barrot 8041a02 and similar) sold as
+“Bluetooth 5.0/5.1/5.3 USB adapter” — ORICO BTA-403, Орбита OT-PCB13 and
+countless no-name AliExpress dongles. They squat the VID/PID of a real
+Cambridge Silicon Radio chip but return malformed HCI responses.</p>
+<p>Known fake <code>bcdDevice</code> values:
+<code>0x0100</code>, <code>0x0134</code>, <code>0x1915</code>,
+<code>0x2520</code>, <code>0x7558</code>, <code>0x8891</code>.</p>
+<p>The stock kernel already detects them (<em>“Unbranded CSR clone detected”</em>),
+but its workarounds are not enough for this hardware. This patch additionally:</p>
+<ul>
+<li>pads the undersized HCI Command Complete responses — Read Voice Setting
+<code>0x0c25</code>, Read Transmit Power Level <code>0x0c2d</code>,
+Read Page Scan Type <code>0x0c46</code> — so HCI init survives;</li>
+<li>fixes the fragile USB runtime-PM force-suspend workaround;</li>
+<li>auto-recovers with a USB reset from init failures and command timeouts,
+including a dongle that answers nothing at all — not even the very first
+Reset (<code>0x0c03</code>) — instead of leaving the controller stuck.</li>
+</ul>
+<p>Only detected fake devices are affected. Real CSR hardware is untouched.</p>
+
+<h2 id="install">Install</h2>
+
+<h3>Ubuntu / Debian</h3>
+<pre><code>sudo apt install git dkms linux-headers-$(uname -r)
+git clone https://github.com/hhsnake/csr8510-fix.git
+cd csr8510-fix
+sudo ./install.sh</code></pre>
+
+<h3>Fedora</h3>
+<pre><code>sudo dnf install git dkms kernel-devel-$(uname -r)
+git clone https://github.com/hhsnake/csr8510-fix.git
+cd csr8510-fix
+sudo ./install.sh</code></pre>
+
+<h3>Arch Linux</h3>
+<pre><code>sudo pacman -S git dkms linux-headers bluez-utils
+sudo systemctl enable --now bluetooth
+git clone https://github.com/hhsnake/csr8510-fix.git
+cd csr8510-fix
+sudo ./install.sh</code></pre>
+
+<h3>CachyOS</h3>
+<pre><code>sudo pacman -S --needed git dkms bluez bluez-utils \
+  "$(pacman -Qoq /usr/lib/modules/$(uname -r)/vmlinuz)-headers"
+sudo systemctl enable --now bluetooth
+git clone https://github.com/hhsnake/csr8510-fix.git
+cd csr8510-fix
+sudo ./install.sh</code></pre>
+
+<p>The module is installed to <code>/lib/modules/&lt;ver&gt;/updates/dkms/</code>,
+which takes precedence over the stock module — nothing in the kernel is
+overwritten — and DKMS rebuilds it automatically on every kernel update.</p>
+
+<h3>Verify</h3>
+<pre><code>dkms status csr8510-fix                      # -&gt; installed
+modinfo -F filename btusb                    # -&gt; .../updates/dkms/btusb.ko(.zst)
+journalctl -kf | grep -iE 'bluetooth|csr'    # then plug in the dongle</code></pre>
+
+<h3>Uninstall</h3>
+<pre><code>sudo ./uninstall.sh</code></pre>
+
+<h2>Supported kernels</h2>
+<table>
+<thead><tr><th>Variant</th><th>Used for kernels</th><th>Tested on</th></tr></thead>
+<tbody>
+<tr><td><code>src/5.15</code></td><td>&lt; 5.19</td><td>5.15.0-185-generic (Ubuntu 22.04)</td></tr>
+<tr><td><code>src/5.19</code></td><td>5.19 – 6.1</td><td>5.19.0-50-generic (Ubuntu 22.04)</td></tr>
+<tr><td><code>src/6.2</code></td><td>6.2 – 6.4</td><td>6.2.0-39-generic (Ubuntu 22.04)</td></tr>
+<tr><td><code>src/6.5</code></td><td>6.5 – 6.7</td><td>6.5.0-45-generic (Ubuntu 22.04)</td></tr>
+<tr><td><code>src/6.8</code></td><td>6.8 – 6.10</td><td>6.8.0-94, 6.8.0-134-generic (Ubuntu 22.04)</td></tr>
+<tr><td><code>src/6.11</code></td><td>6.11 – 6.13</td><td>6.11.0-29-generic (Ubuntu 24.04); 6.11.4-301.fc41</td></tr>
+<tr><td><code>src/6.14</code></td><td>6.14 – 6.16</td><td>6.14.0-37-generic (Ubuntu 24.04)</td></tr>
+<tr><td><code>src/6.17</code></td><td>≥ 6.17</td><td>6.17.0-35, 7.0.0-14-generic (Ubuntu 24.04); 6.17.10-100.fc41; 6.19.10-300.fc44, 7.1.4-200.fc44; 7.1.4-arch1-1, 6.18.39-1-lts, 7.1.4-zen1-1 (Arch); 7.1.8-1-cachyos</td></tr>
+</tbody>
+</table>
+<p>The right variant is picked automatically at build time.</p>
+
+<h2>Building your own kernel instead?</h2>
+<p>Apply the matching diff from
+<a href="https://github.com/hhsnake/csr8510-fix/tree/main/patches">patches/</a>:</p>
+<pre><code>cd linux-&lt;version&gt;
+patch -p1 &lt; .../patches/csr8510-fix-6.17.patch</code></pre>
+
+<h2>Troubleshooting</h2>
+<ul>
+<li><strong>Secure Boot</strong> — the module is signed automatically if DKMS MOK
+signing is set up; otherwise enroll a key (<code>man mokutil</code>) or disable
+Secure Boot.</li>
+<li><strong>Two Bluetooth adapters</strong> — a built-in controller may interfere.
+Disable it for testing: <code>rfkill list</code>, then <code>rfkill block &lt;id&gt;</code>.</li>
+<li><strong><code>module verification failed ... tainting kernel</code></strong> in dmesg
+is harmless on machines without Secure Boot — it only means the module is
+unsigned.</li>
+</ul>
+
+<h2>По-русски</h2>
+<p>Не работает Bluetooth-адаптер <code>0a12:0001</code> «CSR8510 A10» в Linux —
+Ubuntu, Debian, Fedora, Arch, CachyOS? Это дешёвый клон на чипе Barrot 8041a02,
+который продаётся как «Bluetooth 5.0 USB адаптер» (ORICO BTA-403,
+Орбита OT-PCB13 и безымянные донглы с AliExpress). В Windows он работает,
+в Linux — нет: <code>bluetoothctl</code> пишет «No default controller available»,
+а в <code>dmesg</code> видно <code>Opcode 0x0c03 failed: -110</code> или
+<code>command 0x1001 tx timeout</code>.</p>
+<p>Решение — исправленный драйвер <code>btusb</code>, собираемый через DKMS
+(пересобирается сам при обновлении ядра, штатный модуль не затирается).
+Команды установки — в разделе <a href="#install">Install</a> выше;
+исходники и баг-репорты —
+<a href="https://github.com/hhsnake/csr8510-fix">на GitHub</a>.</p>
+
+<h2>Questions &amp; feedback</h2>
+<p>Bug reports, questions and suggestions are welcome in
+<a href="https://github.com/hhsnake/csr8510-fix/issues">GitHub Issues</a>.
+When reporting, please attach the output of <code>uname -r</code>,
+<code>lsusb | grep 0a12</code> and
+<code>journalctl -k | grep -iE 'bluetooth|csr'</code>.</p>
+
+<footer>
+<p>GPL-2.0 — same as the Linux kernel; <code>btusb.c</code> is derived from
+kernel sources. Source:
+<a href="https://github.com/hhsnake/csr8510-fix">github.com/hhsnake/csr8510-fix</a></p>
+</footer>
+
+</div>
+</body>
+</html>

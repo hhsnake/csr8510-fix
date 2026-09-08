@@ -33,6 +33,7 @@ static bool force_scofix;
 static bool enable_autosuspend = IS_ENABLED(CONFIG_BT_HCIBTUSB_AUTOSUSPEND);
 
 static bool reset = true;
+static bool csr_disable_le = true;
 
 static struct usb_driver btusb_driver;
 
@@ -1997,6 +1998,50 @@ static int btusb_setup_bcm92035(struct hci_dev *hdev)
 	return 0;
 }
 
+/* Fake CSR clones advertise LE support in their local features, but the LE
+ * command set is not actually implemented: LE Set Random Address (0x2005) and
+ * LE Set Scan Parameters (0x200b) both fail with -EPIPE. The core cannot learn
+ * this before it starts LE initialisation, so the dual-mode discovery that
+ * every desktop Bluetooth stack begins with aborts before it ever reaches
+ * BR/EDR. The adapter then looks perfectly healthy - UP RUNNING with a valid
+ * BD address - yet never finds a single device, while scanning from
+ * bluetoothctl still works. That combination makes the fault look like a
+ * desktop bug rather than a controller one, so it is worth hiding LE outright.
+ *
+ * Clear the LE bits while the local-features response is still in flight, so
+ * the core brings the controller up as BR/EDR-only and never emits an LE
+ * command. Same end state as "ControllerMode = bredr" in bluetoothd's
+ * main.conf, without requiring the user to configure anything.
+ */
+static void btusb_csr_hide_le(struct hci_dev *hdev, struct sk_buff *skb,
+			      u16 opcode)
+{
+	struct hci_rp_read_local_ext_features *ep;
+	struct hci_rp_read_local_features *fp;
+	size_t off = sizeof(struct hci_event_hdr) +
+		     sizeof(struct hci_ev_cmd_complete);
+	void *rp = skb->data + off;
+	size_t rlen = skb->len - off;
+
+	if (opcode == HCI_OP_READ_LOCAL_FEATURES) {
+		if (rlen < sizeof(*fp))
+			return;
+		fp = rp;
+		if (fp->status || !(fp->features[4] & LMP_LE))
+			return;
+		fp->features[4] &= ~LMP_LE;
+		bt_dev_info(hdev,
+			    "CSR: hiding advertised but non-functional LE support");
+	} else {
+		if (rlen < sizeof(*ep))
+			return;
+		ep = rp;
+		if (ep->status || ep->page != 0x01)
+			return;
+		ep->features[0] &= ~(LMP_HOST_LE | LMP_HOST_LE_BREDR);
+	}
+}
+
 /* Unbranded CSR clones return undersized payloads for several HCI commands.
  * HCI_QUIRK_BROKEN_READ_VOICE_SETTING and HCI_QUIRK_BROKEN_READ_PAGE_SCAN_TYPE
  * were added to the kernel after 6.8.0-94 and are not available in the running
@@ -2023,6 +2068,11 @@ static int btusb_recv_event_csr(struct hci_dev *hdev, struct sk_buff *skb)
 	opcode = le16_to_cpu(cc->opcode);
 
 	switch (opcode) {
+	case HCI_OP_READ_LOCAL_FEATURES:
+	case HCI_OP_READ_LOCAL_EXT_FEATURES:
+		if (csr_disable_le)
+			btusb_csr_hide_le(hdev, skb, opcode);
+		goto done;
 	case HCI_OP_READ_VOICE_SETTING:
 		expected_plen = sizeof(*cc) + 3; /* status + __le16 */
 		break;
@@ -4626,6 +4676,10 @@ MODULE_PARM_DESC(enable_autosuspend, "Enable USB autosuspend by default");
 
 module_param(reset, bool, 0644);
 MODULE_PARM_DESC(reset, "Send HCI reset command on initialization");
+
+module_param(csr_disable_le, bool, 0644);
+MODULE_PARM_DESC(csr_disable_le,
+		 "Hide the advertised but non-functional LE support of fake CSR clones");
 
 MODULE_AUTHOR("Marcel Holtmann <marcel@holtmann.org>");
 MODULE_DESCRIPTION("Generic Bluetooth USB driver ver " VERSION);

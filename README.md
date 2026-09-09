@@ -73,6 +73,23 @@ cd csr8510-fix
 sudo ./install.sh
 ```
 
+### RED OS 8
+
+The running kernel comes from the `kernel-lt` package, so the Fedora line above
+fails: `kernel-devel-$(uname -r)` does not exist and `dnf` answers *"Совпадений
+не найдено"*. Derive the name from the installed kernel instead — this form works
+on any RPM distribution, whatever its kernel package is called:
+
+```bash
+K=$(rpm -qf --qf '%{NAME}' /boot/vmlinuz-$(uname -r))
+sudo dnf install git dkms gcc make bc elfutils-libelf-devel bluez \
+  "$K-devel-$(uname -r)"
+sudo systemctl enable --now bluetooth
+git clone https://github.com/hhsnake/csr8510-fix.git
+cd csr8510-fix
+sudo ./install.sh
+```
+
 ### Arch Linux
 
 ```bash
@@ -152,7 +169,7 @@ sudo ./uninstall.sh
 | `src/6.2`  | 6.2 – 6.4   | 6.2.0-39-generic (Ubuntu 22.04) |
 | `src/6.5`  | 6.5 – 6.7   | 6.5.0-45-generic (Ubuntu 22.04) |
 | `src/6.8`  | 6.8 – 6.10  | 6.8.0-94, 6.8.0-134-generic (Ubuntu 22.04) |
-| `src/6.11` | 6.11 – 6.13 | 6.11.0-29-generic (Ubuntu 24.04); 6.11.4-301.fc41 (Fedora 41) |
+| `src/6.11` | 6.11 – 6.13 | 6.11.0-29-generic (Ubuntu 24.04); 6.11.4-301.fc41 (Fedora 41); 6.12.92-1.red80 (RED OS 8.0.3) |
 | `src/6.14` | 6.14 – 6.16 | 6.14.0-37-generic (Ubuntu 24.04); 6.16.12-valve24.5-1-neptune-616 (SteamOS 3.8.14) |
 | `src/6.17` | ≥ 6.17      | 6.17.0-35-generic, 7.0.0-14-generic (Ubuntu 24.04); 6.17.10-100.fc41 (Fedora 41); 6.19.10-300.fc44, 7.1.4-200.fc44 (Fedora 44); 7.1.4-arch1-1, 6.18.39-1-lts, 7.1.4-zen1-1 (Arch), 7.1.8-1-cachyos |
 

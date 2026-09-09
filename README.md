@@ -73,7 +73,7 @@ cd csr8510-fix
 sudo ./install.sh
 ```
 
-### RED OS 8
+### RED OS 7 / RED OS 8
 
 The running kernel comes from the `kernel-lt` package, so the Fedora line above
 fails: `kernel-devel-$(uname -r)` does not exist and `dnf` answers *"Совпадений
@@ -165,7 +165,7 @@ sudo ./uninstall.sh
 | Variant | Used for kernels | Tested on |
 |---|---|---|
 | `src/5.15` | < 5.19      | 5.15.0-185-generic (Ubuntu 22.04) |
-| `src/5.19` | 5.19 – 6.1  | 5.19.0-50-generic (Ubuntu 22.04) |
+| `src/5.19` | 5.19 – 6.1  | 5.19.0-50-generic (Ubuntu 22.04); 6.1.175-1.el7.3 (RED OS 7.3.7) |
 | `src/6.2`  | 6.2 – 6.4   | 6.2.0-39-generic (Ubuntu 22.04) |
 | `src/6.5`  | 6.5 – 6.7   | 6.5.0-45-generic (Ubuntu 22.04) |
 | `src/6.8`  | 6.8 – 6.10  | 6.8.0-94, 6.8.0-134-generic (Ubuntu 22.04) |

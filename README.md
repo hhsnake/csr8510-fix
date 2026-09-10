@@ -259,6 +259,18 @@ Bug reports, questions and suggestions are welcome in
 When reporting, please attach the output of `uname -r`,
 `lsusb | grep 0a12` and `journalctl -k | grep -iE 'bluetooth|csr'`.
 
+## Credits
+
+Derived from the kernel's own `drivers/bluetooth/btusb.c`. Upstream work this
+builds on:
+
+* `btusb.c` itself — Marcel Holtmann and the Linux Bluetooth subsystem
+  contributors.
+* the fake-CSR detection (*"Unbranded CSR clone detected"* and the table of
+  known fake `bcdDevice` values) — Ismael Ferreras Morezuelas.
+* the force-suspend workaround for the Barrot 8041a02 receive issue — Hans de
+  Goede.
+
 ## License
 
 GPL-2.0 (same as the Linux kernel — `btusb.c` is derived from kernel

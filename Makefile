@@ -8,10 +8,12 @@ obj-m := btusb.o
 # release, so a symbol's presence can't be inferred from the kernel version.
 # Probe the target kernel's headers and let src/*/btusb.c #ifdef on the result.
 # HCI_PRIMARY (with dev_type/HCI_AMP) was removed in 6.10; HCI_QUIRK_VALID_LE_STATES
-# was inverted to HCI_QUIRK_BROKEN_LE_STATES in 6.11.
+# was inverted to HCI_QUIRK_BROKEN_LE_STATES in 6.11;
+# HCI_QUIRK_BROKEN_ERR_DATA_REPORTING only exists from 5.19 on (src/5.4).
 _hci_h := $(srctree)/include/net/bluetooth/hci.h
 ccflags-$(shell grep -qw HCI_PRIMARY $(_hci_h) 2>/dev/null && echo y) += -DHAVE_HCI_PRIMARY
 ccflags-$(shell grep -qw HCI_QUIRK_VALID_LE_STATES $(_hci_h) 2>/dev/null && echo y) += -DHAVE_HCI_QUIRK_VALID_LE_STATES
+ccflags-$(shell grep -qw HCI_QUIRK_BROKEN_ERR_DATA_REPORTING $(_hci_h) 2>/dev/null && echo y) += -DHAVE_HCI_QUIRK_BROKEN_ERR_DATA_REPORTING
 
 # Convenience part: "make" in the repo root builds the module for the
 # running kernel without DKMS (for a quick one-off test).

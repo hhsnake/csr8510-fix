@@ -2,7 +2,7 @@
 
 Patched Linux `btusb` driver for **fake CSR8510 A10 / CSR 4.0–5.x clone USB
 Bluetooth dongles** (`0a12:0001`), packaged as DKMS so it is rebuilt
-automatically on every kernel update. Kernels 5.15 – 7.1+.
+automatically on every kernel update. Kernels 5.4 – 7.1+.
 
 ## Is this your device?
 
@@ -164,7 +164,8 @@ sudo ./uninstall.sh
 
 | Variant | Used for kernels | Tested on |
 |---|---|---|
-| `src/5.15` | < 5.19      | 5.15.0-185-generic (Ubuntu 22.04) |
+| `src/5.4`  | < 5.15      | 5.4.0-216-generic (Ubuntu 20.04) |
+| `src/5.15` | 5.15 – 5.18 | 5.15.0-185-generic (Ubuntu 22.04) |
 | `src/5.19` | 5.19 – 6.1  | 5.19.0-50-generic (Ubuntu 22.04); 6.1.175-1.el7.3 (RED OS 7.3.7) |
 | `src/6.2`  | 6.2 – 6.4   | 6.2.0-39-generic (Ubuntu 22.04) |
 | `src/6.5`  | 6.5 – 6.7   | 6.5.0-45-generic (Ubuntu 22.04) |

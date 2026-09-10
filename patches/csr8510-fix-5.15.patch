@@ -363,7 +363,23 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  
  		/* Re-enable autosuspend if this was requested */
  		if (enable_autosuspend)
-@@ -4148,8 +4402,10 @@
+@@ -3948,10 +4202,15 @@
+ 	hdev->bus = HCI_USB;
+ 	hci_set_drvdata(hdev, data);
+ 
++	/* dev_type/HCI_AMP/HCI_PRIMARY were removed with AMP in 6.10; downstream
++	 * kernels (e.g. Debian 12's 6.1.187) backported that removal. Only touch
++	 * dev_type on kernels that still have it. */
++#ifdef HAVE_HCI_PRIMARY
+ 	if (id->driver_info & BTUSB_AMP)
+ 		hdev->dev_type = HCI_AMP;
+ 	else
+ 		hdev->dev_type = HCI_PRIMARY;
++#endif
+ 
+ 	data->hdev = hdev;
+ 
+@@ -4148,8 +4407,10 @@
  
  		/* Fake CSR devices with broken commands */
  		if (le16_to_cpu(udev->descriptor.idVendor)  == 0x0a12 &&
@@ -375,7 +391,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	if (id->driver_info & BTUSB_SNIFFER) {
-@@ -4421,6 +4677,10 @@
+@@ -4421,6 +4682,10 @@
  module_param(reset, bool, 0644);
  MODULE_PARM_DESC(reset, "Send HCI reset command on initialization");
  

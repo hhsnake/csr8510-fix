@@ -401,7 +401,23 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	kfree_skb(skb);
-@@ -3854,11 +4151,15 @@
+@@ -3679,10 +3976,15 @@
+ 	hdev->bus = HCI_USB;
+ 	hci_set_drvdata(hdev, data);
+ 
++	/* dev_type/HCI_AMP/HCI_PRIMARY were removed with AMP in 6.10; downstream
++	 * kernels (e.g. Debian 12's 6.1.187) backported that removal. Only touch
++	 * dev_type on kernels that still have it. */
++#ifdef HAVE_HCI_PRIMARY
+ 	if (id->driver_info & BTUSB_AMP)
+ 		hdev->dev_type = HCI_AMP;
+ 	else
+ 		hdev->dev_type = HCI_PRIMARY;
++#endif
+ 
+ 	data->hdev = hdev;
+ 
+@@ -3854,11 +4156,15 @@
  		if (bcdDevice < 0x117)
  			set_bit(HCI_QUIRK_RESET_ON_CLOSE, &hdev->quirks);
  
@@ -420,7 +436,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	if (id->driver_info & BTUSB_SNIFFER) {
-@@ -4128,6 +4429,10 @@
+@@ -4128,6 +4434,10 @@
  module_param(reset, bool, 0644);
  MODULE_PARM_DESC(reset, "Send HCI reset command on initialization");
  

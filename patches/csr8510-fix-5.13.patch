@@ -303,12 +303,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
 +		 * cycle here. Unlike upstream, leave wakeup capability alone:
 +		 * some clones then refuse the forced suspend on later init
 +		 * passes, and a working init beats the autosuspend tweak.
- 		 */
--		if (bcdDevice == 0x8891 &&
--		    le16_to_cpu(rp->lmp_subver) == 0x1012 &&
--		    le16_to_cpu(rp->hci_rev) == 0x0810 &&
--		    le16_to_cpu(rp->hci_ver) == BLUETOOTH_VER_4_0) {
--			bt_dev_warn(hdev, "CSR: detected a fake CSR dongle using a Barrot 8041a02 chip, this chip is very buggy and may have issues");
++		 */
 +		btusb_log_csr_pm_state(hdev, data, "before allow", 0);
 +		pm_runtime_allow(&data->udev->dev);
 +		btusb_log_csr_pm_state(hdev, data, "after allow", 0);
@@ -318,10 +313,16 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
 +		 * btusb_open() sets it, and this one-shot suspend does not need
 +		 * it. Drop it across the call, and use the force variant to also
 +		 * bypass the usage_count and child_count checks.
-+		 */
+ 		 */
+-		if (bcdDevice == 0x8891 &&
+-		    le16_to_cpu(rp->lmp_subver) == 0x1012 &&
+-		    le16_to_cpu(rp->hci_rev) == 0x0810 &&
+-		    le16_to_cpu(rp->hci_ver) == BLUETOOTH_VER_4_0) {
+-			bt_dev_warn(hdev, "CSR: detected a fake CSR dongle using a Barrot 8041a02 chip, this chip is very buggy and may have issues");
 +		child_count = atomic_read(&data->udev->dev.power.child_count);
 +		btusb_log_csr_pm_state(hdev, data, "pre-suspend", 0);
-+
+ 
+-			pm_runtime_allow(&data->udev->dev);
 +		if (child_count) {
 +			bt_dev_warn(hdev,
 +				    "CSR: skipping force_suspend while child_count=%d after reset/rebind",
@@ -337,8 +338,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
 +				ret = pm_runtime_force_suspend(&data->udev->dev);
 +			}
 +			data->intf->needs_remote_wakeup = 1;
- 
--			pm_runtime_allow(&data->udev->dev);
++
 +			btusb_log_csr_pm_state(hdev, data, "after force_suspend", ret);
  
 -			ret = pm_runtime_suspend(&data->udev->dev);
@@ -372,7 +372,23 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	kfree_skb(skb);
-@@ -4750,8 +4957,10 @@
+@@ -4538,10 +4745,15 @@
+ 	hdev->bus = HCI_USB;
+ 	hci_set_drvdata(hdev, data);
+ 
++	/* dev_type/HCI_AMP/HCI_PRIMARY were removed with AMP in 6.10; downstream
++	 * kernels (e.g. Debian 12's 6.1.187) backported that removal. Only touch
++	 * dev_type on kernels that still have it. */
++#ifdef HAVE_HCI_PRIMARY
+ 	if (id->driver_info & BTUSB_AMP)
+ 		hdev->dev_type = HCI_AMP;
+ 	else
+ 		hdev->dev_type = HCI_PRIMARY;
++#endif
+ 
+ 	data->hdev = hdev;
+ 
+@@ -4750,8 +4962,10 @@
  
  		/* Fake CSR devices with broken commands */
  		if (le16_to_cpu(udev->descriptor.idVendor)  == 0x0a12 &&
@@ -384,7 +400,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	if (id->driver_info & BTUSB_SNIFFER) {
-@@ -5019,6 +5228,10 @@
+@@ -5019,6 +5233,10 @@
  module_param(reset, bool, 0644);
  MODULE_PARM_DESC(reset, "Send HCI reset command on initialization");
  

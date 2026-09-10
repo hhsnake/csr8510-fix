@@ -4503,10 +4503,15 @@ static int btusb_probe(struct usb_interface *intf,
 	hdev->bus = HCI_USB;
 	hci_set_drvdata(hdev, data);
 
+	/* dev_type/HCI_AMP/HCI_PRIMARY were removed with AMP in 6.10; downstream
+	 * kernels (e.g. Debian 12's 6.1.187) backported that removal. Only touch
+	 * dev_type on kernels that still have it. */
+#ifdef HAVE_HCI_PRIMARY
 	if (id->driver_info & BTUSB_AMP)
 		hdev->dev_type = HCI_AMP;
 	else
 		hdev->dev_type = HCI_PRIMARY;
+#endif
 
 	data->hdev = hdev;
 

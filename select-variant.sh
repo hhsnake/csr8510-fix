@@ -5,21 +5,17 @@
 #
 # Variants (each is the full patched drivers/bluetooth/btusb.c of that
 # kernel series plus the local headers it includes):
-#   src/5.4   - kernels < 5.15     (tested on 5.4.0-216-generic; this tree
-#                                   predates the kernel's own fake-CSR
-#                                   detection, so the variant backports it)
-#   src/5.13  - kernels 5.13..5.14 (tested on 5.13.0-52-generic; btintel's ABI
-#                                   changed in 5.13 - btintel_download_firmware()
-#                                   gained an argument - so src/5.4 would call it
-#                                   wrongly, while src/5.15 needs btintel symbols
-#                                   that do not exist yet)
+#   src/5.4   - kernels < 5.13     (tested on 5.4.0-42, 5.4.0-216-generic,
+#                                   5.8.0-63, 5.10.0-9, 5.11.0-46)
+#   src/5.13  - kernels 5.13..5.14 (tested on 5.13.0-52-generic)
 #   src/5.15  - kernels 5.15..5.18 (tested on 5.15.0-185-generic)
-#   src/5.19  - kernels 5.19..6.1  (tested on 5.19.0-50-generic)
+#   src/5.19  - kernels 5.19..6.1  (tested on 5.19.0-50-generic;
+#                                   6.1.0-53-amd64)
 #   src/6.2   - kernels 6.2..6.4   (tested on 6.2.0-39-generic)
 #   src/6.5   - kernels 6.5..6.7   (tested on 6.5.0-45-generic)
 #   src/6.8   - kernels 6.8..6.10  (tested on 6.8.0-94/134-generic)
 #   src/6.11  - kernels 6.11..6.13 (tested on 6.11.0-29-generic;
-#                                   6.11.4-301.fc41)
+#                                   6.11.4-301.fc41; 6.12.101+deb12-amd64)
 #   src/6.14  - kernels 6.14..6.16 (tested on 6.14.0-37-generic; these
 #                                   Ubuntu/stable trees backported the
 #                                   quirk_flags API and removed cmd_timeout)
@@ -61,8 +57,8 @@ fi
 
 # Versions the variants were actually built and run against.
 case "$n" in
-    504|508|511|513|515|519|602|605|608|611|614|617|619|700|701) tested=yes ;;
-    *)                                                           tested=no  ;;
+    504|508|510|511|513|515|519|601|602|605|608|611|612|614|617|619|700|701) tested=yes ;;
+    *)                                                                 tested=no  ;;
 esac
 
 echo "csr8510-fix: kernel $kv -> source variant src/$variant"

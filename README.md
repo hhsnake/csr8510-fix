@@ -164,7 +164,8 @@ sudo ./uninstall.sh
 
 | Variant | Used for kernels | Tested on |
 |---|---|---|
-| `src/5.4`  | < 5.15      | 5.4.0-216-generic (Ubuntu 20.04) |
+| `src/5.4`  | < 5.13      | 5.4.0-42, 5.4.0-216-generic (Ubuntu 20.04); 5.8.0-63, 5.11.0-46-generic (Ubuntu 20.04 HWE) |
+| `src/5.13` | 5.13 – 5.14 | 5.13.0-52-generic (Ubuntu 20.04 HWE) |
 | `src/5.15` | 5.15 – 5.18 | 5.15.0-185-generic (Ubuntu 22.04) |
 | `src/5.19` | 5.19 – 6.1  | 5.19.0-50-generic (Ubuntu 22.04); 6.1.175-1.el7.3 (RED OS 7.3.7) |
 | `src/6.2`  | 6.2 – 6.4   | 6.2.0-39-generic (Ubuntu 22.04) |

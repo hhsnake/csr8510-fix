@@ -8,6 +8,11 @@
 #   src/5.4   - kernels < 5.15     (tested on 5.4.0-216-generic; this tree
 #                                   predates the kernel's own fake-CSR
 #                                   detection, so the variant backports it)
+#   src/5.13  - kernels 5.13..5.14 (tested on 5.13.0-52-generic; btintel's ABI
+#                                   changed in 5.13 - btintel_download_firmware()
+#                                   gained an argument - so src/5.4 would call it
+#                                   wrongly, while src/5.15 needs btintel symbols
+#                                   that do not exist yet)
 #   src/5.15  - kernels 5.15..5.18 (tested on 5.15.0-185-generic)
 #   src/5.19  - kernels 5.19..6.1  (tested on 5.19.0-50-generic)
 #   src/6.2   - kernels 6.2..6.4   (tested on 6.2.0-39-generic)
@@ -50,13 +55,14 @@ elif [ "$n" -ge 605 ]; then variant=6.5
 elif [ "$n" -ge 602 ]; then variant=6.2
 elif [ "$n" -ge 519 ]; then variant=5.19
 elif [ "$n" -ge 515 ]; then variant=5.15
+elif [ "$n" -ge 513 ]; then variant=5.13
 else                        variant=5.4
 fi
 
 # Versions the variants were actually built and run against.
 case "$n" in
-    504|515|519|602|605|608|611|614|617|619|700|701) tested=yes ;;
-    *)                                               tested=no  ;;
+    504|508|511|513|515|519|602|605|608|611|614|617|619|700|701) tested=yes ;;
+    *)                                                           tested=no  ;;
 esac
 
 echo "csr8510-fix: kernel $kv -> source variant src/$variant"

@@ -41,7 +41,7 @@ static bool force_scofix;
 static bool enable_autosuspend = IS_ENABLED(CONFIG_BT_HCIBTUSB_AUTOSUSPEND);
 
 static bool reset = true;
-static bool csr_disable_le = true;
+static bool csr_mask_commands = true;
 
 static struct usb_driver btusb_driver;
 
@@ -1700,42 +1700,66 @@ static int btusb_setup_bcm92035(struct hci_dev *hdev)
 	return 0;
 }
 
-/* These clones advertise LE but fail every LE command (0x2005, 0x200b: -EPIPE),
- * which aborts the dual-mode discovery desktop stacks start with before it
- * reaches BR/EDR. Clear the LE bits in the local-features response so the core
- * comes up BR/EDR-only, like "ControllerMode = bredr" in bluetoothd.
+/* Fake CSR clones lie in their Supported Commands bitmap (Read Local Supported
+ * Commands, 0x1002): they advertise commands their firmware never implemented.
+ * The core trusts that bitmap and gates roughly twenty initialisation commands
+ * on it, so the lie turns straight into malformed replies and aborted init.
+ *
+ * The CSR stack on Windows never reads the bitmap - 0x1002 is not part of its
+ * init sequence at all - which is a large part of why the same silicon works
+ * there. Clearing the bits for commands these clones cannot honour makes the
+ * core stop asking, reaching the same end state without touching the core.
+ *
+ * Masking is preferred over the equivalent HCI quirks because the bit positions
+ * come from the Bluetooth specification and are stable, so one implementation
+ * covers every kernel this module is built against - whereas the quirks only
+ * exist in recent ones and have to be probed for at build time.
+ *
+ * Deliberately conservative; extend once a trace shows another command
+ * misbehaving on real hardware:
+ *
+ *   commands[9]  & 0x04  Read Voice Setting  (0x0c25) - returns 2 of 3 bytes
+ *   commands[13] & 0x01  Read Page Scan Type (0x0c46) - returns 1 of 2 bytes
+ *
+ * Both are advertised by the clones and both are absent from the CSR driver on
+ * Windows, which only ever issues the Write variants (0x0c26 / 0x0c47).
+ *
+ * LE Read Accept List Size (0x200f, commands[26] & 0x40) is also absent from
+ * the Windows driver, but a trace of this hardware shows it completing
+ * successfully, so it is deliberately left alone.
  */
-static void btusb_csr_hide_le(struct hci_dev *hdev, struct sk_buff *skb,
-			      u16 opcode)
+static void btusb_csr_mask_commands(struct hci_dev *hdev, struct sk_buff *skb)
 {
-	struct hci_rp_read_local_ext_features *ep;
-	struct hci_rp_read_local_features *fp;
+	struct hci_rp_read_local_commands *rp;
 	size_t off = sizeof(struct hci_event_hdr) +
 		     sizeof(struct hci_ev_cmd_complete);
-	void *rp = skb->data + off;
-	size_t rlen = skb->len - off;
 
-	if (opcode == HCI_OP_READ_LOCAL_FEATURES) {
-		if (rlen < sizeof(*fp))
-			return;
-		fp = rp;
-		if (fp->status || !(fp->features[4] & LMP_LE))
-			return;
-		fp->features[4] &= ~LMP_LE;
-		bt_dev_info(hdev,
-			    "CSR: hiding advertised but non-functional LE support");
-	} else {
-		if (rlen < sizeof(*ep))
-			return;
-		ep = rp;
-		if (ep->status || ep->page != 0x01)
-			return;
-		ep->features[0] &= ~(LMP_HOST_LE | LMP_HOST_LE_BREDR);
-	}
+	if (skb->len < off + sizeof(*rp))
+		return;
+
+	rp = (void *)(skb->data + off);
+	if (rp->status)
+		return;
+
+	if (!(rp->commands[9] & 0x04) && !(rp->commands[13] & 0x01))
+		return;
+
+	bt_dev_info(hdev, "CSR: clearing advertised support for%s%s",
+		    rp->commands[9]  & 0x04 ? " Read Voice Setting" : "",
+		    rp->commands[13] & 0x01 ? " Read Page Scan Type" : "");
+
+	rp->commands[9]  &= ~0x04;
+	rp->commands[13] &= ~0x01;
 }
 
-/* Pad the undersized command-complete payloads these clones return, so the
- * core parser stays in sync (5.4 has no BROKEN_READ_* quirks to skip them):
+/* Unbranded CSR clones also return undersized payloads for several HCI
+ * commands. Where the command is gated by the Supported Commands bitmap the
+ * masking above already stops it being sent; HCI_OP_READ_TX_POWER is not gated
+ * that way (the core issues it per connection from mgmt, and despite its name
+ * HCI_QUIRK_BROKEN_READ_TRANSMIT_POWER gates LE Read Transmit Power 0x204b
+ * instead), so padding stays as the fallback for all three.
+ *
+ * Known short responses (clone payload vs. expected):
  *   HCI_OP_READ_VOICE_SETTING  (0x0c25): 2 bytes instead of 3
  *   HCI_OP_READ_TX_POWER       (0x0c2d): 3 bytes instead of 4
  *   HCI_OP_READ_PAGE_SCAN_TYPE (0x0c46): 1 byte  instead of 2
@@ -1755,10 +1779,9 @@ static int btusb_recv_event_csr(struct hci_dev *hdev, struct sk_buff *skb)
 	opcode = le16_to_cpu(cc->opcode);
 
 	switch (opcode) {
-	case HCI_OP_READ_LOCAL_FEATURES:
-	case HCI_OP_READ_LOCAL_EXT_FEATURES:
-		if (csr_disable_le)
-			btusb_csr_hide_le(hdev, skb, opcode);
+	case HCI_OP_READ_LOCAL_COMMANDS:
+		if (csr_mask_commands)
+			btusb_csr_mask_commands(hdev, skb);
 		goto done;
 	case HCI_OP_READ_VOICE_SETTING:
 		expected_plen = sizeof(*cc) + 3; /* status + __le16 */
@@ -1887,6 +1910,24 @@ static int btusb_setup_csr(struct hci_dev *hdev)
 		set_bit(HCI_QUIRK_BROKEN_ERR_DATA_REPORTING, &hdev->quirks);
 #endif
 
+		/* Where the running kernel has them, these skip the two commands
+		 * the clones answer with a truncated payload - the same end state
+		 * the Supported Commands masking below produces, kept as a second
+		 * line of defence for the case where 0x1002 itself misbehaves.
+		 * Probed for at build time by the Makefile because distro kernels
+		 * backport them into older releases.
+		 */
+#ifdef HAVE_HCI_QUIRK_BROKEN_READ_VOICE_SETTING
+		set_bit(HCI_QUIRK_BROKEN_READ_VOICE_SETTING, &hdev->quirks);
+#endif
+#ifdef HAVE_HCI_QUIRK_BROKEN_READ_PAGE_SCAN_TYPE
+		set_bit(HCI_QUIRK_BROKEN_READ_PAGE_SCAN_TYPE, &hdev->quirks);
+#endif
+
+		/* Sanitise the Supported Commands bitmap these clones lie in, and
+		 * pad the undersized command-complete payloads they return. See
+		 * btusb_csr_mask_commands() and btusb_recv_event_csr().
+		 */
 		data->recv_event = btusb_recv_event_csr;
 
 		/* Not an actual early Bluetooth 1.1 device from CSR. */
@@ -4434,9 +4475,9 @@ MODULE_PARM_DESC(enable_autosuspend, "Enable USB autosuspend by default");
 module_param(reset, bool, 0644);
 MODULE_PARM_DESC(reset, "Send HCI reset command on initialization");
 
-module_param(csr_disable_le, bool, 0644);
-MODULE_PARM_DESC(csr_disable_le,
-		 "Hide the advertised but non-functional LE support of fake CSR clones");
+module_param(csr_mask_commands, bool, 0644);
+MODULE_PARM_DESC(csr_mask_commands,
+		 "Clear the Supported Commands bits fake CSR clones advertise but cannot honour");
 
 MODULE_AUTHOR("Marcel Holtmann <marcel@holtmann.org>");
 MODULE_DESCRIPTION("Generic Bluetooth USB driver ver " VERSION);

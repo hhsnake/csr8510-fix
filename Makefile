@@ -14,6 +14,11 @@ _hci_h := $(srctree)/include/net/bluetooth/hci.h
 ccflags-$(shell grep -qw HCI_PRIMARY $(_hci_h) 2>/dev/null && echo y) += -DHAVE_HCI_PRIMARY
 ccflags-$(shell grep -qw HCI_QUIRK_VALID_LE_STATES $(_hci_h) 2>/dev/null && echo y) += -DHAVE_HCI_QUIRK_VALID_LE_STATES
 ccflags-$(shell grep -qw HCI_QUIRK_BROKEN_ERR_DATA_REPORTING $(_hci_h) 2>/dev/null && echo y) += -DHAVE_HCI_QUIRK_BROKEN_ERR_DATA_REPORTING
+# HCI_QUIRK_BROKEN_READ_VOICE_SETTING / _READ_PAGE_SCAN_TYPE skip the two commands
+# the CSR clones answer with a truncated payload. Upstream since 6.14, backported
+# into Ubuntu HWE 6.8 somewhere between 6.8.0-94 and 6.8.0-107.
+ccflags-$(shell grep -qw HCI_QUIRK_BROKEN_READ_VOICE_SETTING $(_hci_h) 2>/dev/null && echo y) += -DHAVE_HCI_QUIRK_BROKEN_READ_VOICE_SETTING
+ccflags-$(shell grep -qw HCI_QUIRK_BROKEN_READ_PAGE_SCAN_TYPE $(_hci_h) 2>/dev/null && echo y) += -DHAVE_HCI_QUIRK_BROKEN_READ_PAGE_SCAN_TYPE
 
 # Convenience part: "make" in the repo root builds the module for the
 # running kernel without DKMS (for a quick one-off test).

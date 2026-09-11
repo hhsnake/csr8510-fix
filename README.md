@@ -34,22 +34,22 @@ chip but return malformed HCI responses. Known fake `bcdDevice` values:
 detects them (*"Unbranded CSR clone detected"*) but its workarounds are not
 enough for this hardware. This patch additionally:
 
-* pads the undersized HCI Command Complete responses (`Read Voice Setting`
-  0x0c25, `Read Transmit Power Level` 0x0c2d, `Read Page Scan Type` 0x0c46)
-  so HCI init survives;
+* stops the two commands these clones answer with a truncated payload
+  (`Read Voice Setting` 0x0c25, `Read Page Scan Type` 0x0c46) from ever being
+  sent, by clearing their bits in the Supported Commands bitmap the clone
+  advertises — the same thing CSR's own Windows driver does by never asking;
+* still pads an undersized Command Complete if one arrives anyway, as a
+  fallback (also covers `Read Transmit Power Level` 0x0c2d, which is not
+  gated by that bitmap);
 * fixes the fragile USB runtime-PM suspend workaround;
 * auto-recovers with a USB reset from init failures and command timeouts,
   including a dongle that answers nothing at all — not even the very first
-  `Reset` (0x0c03) — instead of leaving the controller stuck;
-* hides the Bluetooth LE support these clones advertise but do not
-  implement, so desktop Bluetooth stacks stop aborting discovery on the LE
-  half — see [Advertised LE that does not work](#advertised-le-that-does-not-work).
+  `Reset` (0x0c03) — instead of leaving the controller stuck.
 
 There is also a second, quieter failure mode with no error at all in the
 usual places: the adapter comes up looking perfectly healthy, but the
 desktop's Bluetooth panel never finds a single device, while
-`bluetoothctl scan on` from a terminal finds them immediately. See
-[Advertised LE that does not work](#advertised-le-that-does-not-work).
+`bluetoothctl scan on` from a terminal finds them immediately.
 
 Only detected fake devices are affected — real CSR hardware is untouched.
 
@@ -189,46 +189,46 @@ cd linux-<version>
 patch -p1 < .../patches/csr8510-fix-6.17.patch
 ```
 
-## Advertised LE that does not work
+## LE that only looked broken
 
-These clones report Bluetooth LE in their local features and then fail every
-LE command:
+These clones report Bluetooth LE in their local features, and early on that
+looked like a lie: LE commands came back as failures and desktop discovery
+died on the LE half.
 
 ```
 Bluetooth: hci0: Opcode 0x2005 failed: -32     # LE Set Random Address
 Bluetooth: hci0: Opcode 0x200b failed: -32     # LE Set Scan Parameters
 ```
 
-Desktop Bluetooth stacks start discovery in dual mode, so the failing LE half
+Desktop Bluetooth stacks start discovery in dual mode, so a failing LE half
 aborts the whole scan and nothing is ever found — while `bluetoothctl scan on`
-still works, because it falls back to BR/EDR. Nothing looks broken: `hciconfig`
-shows `UP RUNNING` with a valid BD address, and the controller answers
-everything else. That combination makes the fault read as a desktop bug rather
-than a controller one.
+still works, because it falls back to BR/EDR. Nothing looks broken:
+`hciconfig` shows `UP RUNNING` with a valid BD address, and the controller
+answers everything else. That combination makes the fault read as a desktop
+bug rather than a controller one.
 
-The driver therefore clears the LE feature bits for these clones while the
-`Read Local Features` response is still in flight, so the core brings the
-controller up as BR/EDR-only and never sends an LE command. Nothing usable is
-lost: the LE this hides was never functional.
+The controller answers LE commands correctly. The real fault is two BR/EDR
+replies that come back a byte short, and the driver stops the core from
+asking for them — so LE is left alone and simply works.
 
 Only devices matching `0a12:0001` **and** detected as fake are affected. Other
-adapters in the same machine keep full LE support.
+adapters in the same machine are untouched.
 
-To keep the advertised LE — for instance to test a clone whose LE does work:
+To rule the workaround out while debugging:
 
 ```bash
 # /etc/modprobe.d/csr8510-fix.conf
-options btusb csr_disable_le=0
+options btusb csr_mask_commands=0
 ```
 
-**Alternative without this driver.** The same end state can be reached by
-forcing bluetoothd to BR/EDR. Note this is a *global* setting: it disables LE
-for every controller on the host, including a working built-in one.
+**If LE still misbehaves on your clone.** Firmware varies between these
+dongles. Forcing bluetoothd to BR/EDR is the fallback — note it is a *global*
+setting that disables LE for every controller on the host, including a working
+built-in one.
 
 ```ini
 # /etc/bluetooth/main.conf
 [General]
-# this clone advertises LE but does not implement it
 ControllerMode = bredr
 ```
 

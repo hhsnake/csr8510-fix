@@ -1071,7 +1071,7 @@ static void btusb_csr_cmd_timeout(struct hci_dev *hdev)
 		return;
 
 	bt_dev_err(hdev, "CSR: command timeout recovery attempt %u",
-		   data->cmd_timeout_cnt + 1);
+		   ++data->cmd_timeout_cnt);
 
 	if (test_and_set_bit(BTUSB_HW_RESET_ACTIVE, &data->flags)) {
 		bt_dev_err(hdev, "CSR: last reset still active, not resetting again");
@@ -1081,14 +1081,9 @@ static void btusb_csr_cmd_timeout(struct hci_dev *hdev)
 	btusb_reset(hdev);
 }
 
-/* Fake CSR clones can wedge so hard that they stop answering HCI commands
- * entirely; only a USB reset (equivalent to a physical replug) revives them.
- * When that happens while hci_dev_do_open() waits for its first command, the
- * core times out and closes the device, cancelling cmd_timer before the
- * reset/cmd_timeout callback above ever runs - so recovery must be driven
- * from close: if not a single HCI event arrived between open and close,
- * reset. Rate-limited module-wide because a reset rebinds the driver with
- * fresh flags, so per-device state cannot stop a dead dongle from looping.
+/* A dead clone answers nothing, so the core closes the device before
+ * cmd_timer ever fires; drive the recovery from close instead.
+ * Rate-limited module-wide: a reset rebinds the driver with fresh flags.
  */
 static void btusb_csr_reset_on_silent_close(struct hci_dev *hdev)
 {
@@ -2422,33 +2417,11 @@ static int btusb_setup_bcm92035(struct hci_dev *hdev)
 	return 0;
 }
 
-/* Fake CSR clones lie in their Supported Commands bitmap (Read Local Supported
- * Commands, 0x1002): they advertise commands their firmware never implemented.
- * The core trusts that bitmap and gates roughly twenty initialisation commands
- * on it, so the lie turns straight into malformed replies and aborted init.
+/* Clear the Supported Commands bits these clones advertise but cannot
+ * honour, so the core stops issuing them:
  *
- * The CSR stack on Windows never reads the bitmap - 0x1002 is not part of its
- * init sequence at all - which is a large part of why the same silicon works
- * there. Clearing the bits for commands these clones cannot honour makes the
- * core stop asking, reaching the same end state without touching the core.
- *
- * Masking is preferred over the equivalent HCI quirks because the bit positions
- * come from the Bluetooth specification and are stable, so one implementation
- * covers every kernel this module is built against - whereas the quirks only
- * exist in recent ones and have to be probed for at build time.
- *
- * Deliberately conservative; extend once a trace shows another command
- * misbehaving on real hardware:
- *
- *   commands[9]  & 0x04  Read Voice Setting  (0x0c25) - returns 2 of 3 bytes
- *   commands[13] & 0x01  Read Page Scan Type (0x0c46) - returns 1 of 2 bytes
- *
- * Both are advertised by the clones and both are absent from the CSR driver on
- * Windows, which only ever issues the Write variants (0x0c26 / 0x0c47).
- *
- * LE Read Accept List Size (0x200f, commands[26] & 0x40) is also absent from
- * the Windows driver, but a trace of this hardware shows it completing
- * successfully, so it is deliberately left alone.
+ *   commands[9]  & 0x04  Read Voice Setting  (0x0c25)
+ *   commands[13] & 0x01  Read Page Scan Type (0x0c46)
  */
 static void btusb_csr_mask_commands(struct hci_dev *hdev, struct sk_buff *skb)
 {
@@ -2474,14 +2447,8 @@ static void btusb_csr_mask_commands(struct hci_dev *hdev, struct sk_buff *skb)
 	rp->commands[13] &= ~0x01;
 }
 
-/* Unbranded CSR clones also return undersized payloads for several HCI
- * commands. Where the command is gated by the Supported Commands bitmap the
- * masking above already stops it being sent; HCI_OP_READ_TX_POWER is not gated
- * that way (the core issues it per connection from mgmt, and despite its name
- * HCI_QUIRK_BROKEN_READ_TRANSMIT_POWER gates LE Read Transmit Power 0x204b
- * instead), so padding stays as the fallback for all three.
+/* Pad the undersized command-complete payloads these clones return:
  *
- * Known short responses (clone payload vs. expected):
  *   HCI_OP_READ_VOICE_SETTING  (0x0c25): 2 bytes instead of 3
  *   HCI_OP_READ_TX_POWER       (0x0c2d): 3 bytes instead of 4
  *   HCI_OP_READ_PAGE_SCAN_TYPE (0x0c46): 1 byte  instead of 2
@@ -2634,8 +2601,6 @@ static int btusb_setup_csr(struct hci_dev *hdev)
 		is_fake = true;
 
 	if (is_fake) {
-		int child_count;
-
 		bt_dev_warn(hdev, "CSR: Unbranded CSR clone detected; adding workarounds and force-suspending once...");
 		set_bit(BTUSB_FAKE_CSR, &data->flags);
 
@@ -2649,13 +2614,7 @@ static int btusb_setup_csr(struct hci_dev *hdev)
 		set_bit(HCI_QUIRK_BROKEN_FILTER_CLEAR_ALL, &hdev->quirks);
 		set_bit(HCI_QUIRK_NO_SUSPEND_NOTIFIER, &hdev->quirks);
 
-		/* Where the running kernel has them, these skip the two commands
-		 * the clones answer with a truncated payload - the same end state
-		 * the Supported Commands masking below produces, kept as a second
-		 * line of defence for the case where 0x1002 itself misbehaves.
-		 * Probed for at build time by the Makefile because distro kernels
-		 * backport them into older releases.
-		 */
+		/* Probed for at build time; distro kernels backport these. */
 #ifdef HAVE_HCI_QUIRK_BROKEN_READ_VOICE_SETTING
 		set_bit(HCI_QUIRK_BROKEN_READ_VOICE_SETTING, &hdev->quirks);
 #endif
@@ -2663,10 +2622,6 @@ static int btusb_setup_csr(struct hci_dev *hdev)
 		set_bit(HCI_QUIRK_BROKEN_READ_PAGE_SCAN_TYPE, &hdev->quirks);
 #endif
 
-		/* Sanitise the Supported Commands bitmap these clones lie in, and
-		 * pad the undersized command-complete payloads they return. See
-		 * btusb_csr_mask_commands() and btusb_recv_event_csr().
-		 */
 		data->recv_event = btusb_recv_event_csr;
 
 		/* Clear the reset quirk since this is not an actual
@@ -2695,10 +2650,8 @@ static int btusb_setup_csr(struct hci_dev *hdev)
 		 * To fix 2. clear the HCI's can_wake flag, this way the HCI
 		 * will still be autosuspended when it is not open.
 		 *
-		 * Some clones, however, stop accepting the one-shot forced
-		 * suspend on subsequent init passes once wakeup capability has
-		 * been cleared in software. Leave wakeup capability unchanged
-		 * here and prefer a working init path over the autosuspend tweak.
+		 * Some clones stop accepting the forced suspend once wakeup
+		 * capability has been cleared, so leave it unchanged.
 		 *
 		 * --
 		 *
@@ -2710,50 +2663,35 @@ static int btusb_setup_csr(struct hci_dev *hdev)
 		pm_runtime_allow(&data->udev->dev);
 		btusb_log_csr_pm_state(hdev, data, "after allow", 0);
 
-		/* usb_runtime_suspend() calls autosuspend_check(), which
-		 * refuses to suspend if any interface has needs_remote_wakeup
-		 * set while the device lacks wakeup capability.  btusb_open()
-		 * sets needs_remote_wakeup=1 on data->intf so that normal
-		 * autosuspend is blocked while the HCI is open, but for this
-		 * one-shot init-time suspend we do not need remote wakeup.
-		 * Clear it temporarily so autosuspend_check() passes, then
-		 * restore it immediately.  Use the force variant to also bypass
-		 * the device-level usage_count and child_count checks.
+		/* autosuspend_check() refuses while an interface has
+		 * needs_remote_wakeup set on a device with no wakeup
+		 * capability, and btusb_open() also holds an autopm
+		 * reference on it. Drop both across the cycle.
 		 */
-		child_count = atomic_read(&data->udev->dev.power.child_count);
 		btusb_log_csr_pm_state(hdev, data, "pre-suspend", 0);
 
-		if (child_count) {
-			bt_dev_warn(hdev,
-				    "CSR: skipping force_suspend while child_count=%d after reset/rebind",
-				    child_count);
-			btusb_log_csr_pm_state(hdev, data, "skip force_suspend", 0);
-		} else {
-			data->intf->needs_remote_wakeup = 0;
+		data->intf->needs_remote_wakeup = 0;
+		usb_autopm_put_interface(data->intf);
+		ret = pm_runtime_force_suspend(&data->udev->dev);
+		if (ret < 0) {
+			/* Transient -EBUSY during boot; retry once. */
+			btusb_log_csr_pm_state(hdev, data, "force_suspend failed; retrying", ret);
+			msleep(100);
 			ret = pm_runtime_force_suspend(&data->udev->dev);
-			if (ret < 0) {
-				/* Transient -EBUSY while something else still
-				 * holds the interface during boot; retry once.
-				 */
-				btusb_log_csr_pm_state(hdev, data, "force_suspend failed; retrying", ret);
-				msleep(100);
-				ret = pm_runtime_force_suspend(&data->udev->dev);
-			}
-			data->intf->needs_remote_wakeup = 1;
+		}
+		if (usb_autopm_get_interface(data->intf) < 0)
+			bt_dev_warn(hdev, "CSR: could not retake the interface reference");
+		data->intf->needs_remote_wakeup = 1;
 
-			btusb_log_csr_pm_state(hdev, data, "after force_suspend", ret);
+		btusb_log_csr_pm_state(hdev, data, "after force_suspend", ret);
 
-			if (ret >= 0) {
-				msleep(200);
-				ret = pm_runtime_force_resume(&data->udev->dev);
-				btusb_log_csr_pm_state(hdev, data, "after force_resume", ret);
-			} else {
-				/* pm_runtime_force_suspend() re-enables runtime
-				 * PM itself on failure; carry on without the
-				 * one-shot suspend cycle.
-				 */
-				bt_dev_warn(hdev, "CSR: force_suspend failed; skipping one-shot suspend");
-			}
+		if (ret >= 0) {
+			msleep(200);
+			ret = pm_runtime_force_resume(&data->udev->dev);
+			btusb_log_csr_pm_state(hdev, data, "after force_resume", ret);
+		} else {
+			/* force_suspend() re-enables runtime PM on failure. */
+			bt_dev_warn(hdev, "CSR: force_suspend failed; skipping one-shot suspend");
 		}
 
 		pm_runtime_forbid(&data->udev->dev);

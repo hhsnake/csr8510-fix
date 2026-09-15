@@ -109,7 +109,26 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  static void btusb_intel_cmd_timeout(struct hci_dev *hdev)
  {
  	struct btusb_data *data = hci_get_drvdata(hdev);
-@@ -760,6 +835,10 @@
+@@ -619,6 +694,18 @@
+ 		}
+ 
+ 		if (!hci_skb_expect(skb)) {
++			/* Each chunk should correspond to at least 1 or more
++			 * events so if there are still bytes left that doesn't
++			 * constitute a new event this is likely a bug in the
++			 * controller.
++			 */
++			if (count && count < HCI_EVENT_HDR_SIZE) {
++				bt_dev_warn(data->hdev,
++					"Unexpected continuation: %d bytes",
++					count);
++				count = 0;
++			}
++
+ 			/* Complete frame */
+ 			data->recv_event(data->hdev, skb);
+ 			skb = NULL;
+@@ -760,6 +847,10 @@
  	if (urb->status == 0) {
  		hdev->stat.byte_rx += urb->actual_length;
  
@@ -120,7 +139,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  		if (btusb_recv_intr(data, urb->transfer_buffer,
  				    urb->actual_length) < 0) {
  			bt_dev_err(hdev, "corrupted event packet");
-@@ -1194,6 +1273,8 @@
+@@ -1194,6 +1285,8 @@
  	if (err < 0)
  		return err;
  
@@ -129,7 +148,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	/* Patching USB firmware files prior to starting any URBs of HCI path
  	 * It is more safe to use USB bulk channel for downloading USB patch
  	 */
-@@ -1270,6 +1351,8 @@
+@@ -1270,6 +1363,8 @@
  	btusb_stop_traffic(data);
  	btusb_free_frags(data);
  
@@ -138,7 +157,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	err = usb_autopm_get_interface(data->intf);
  	if (err < 0)
  		goto failed;
-@@ -1616,19 +1699,120 @@
+@@ -1616,19 +1711,120 @@
  	return 0;
  }
  
@@ -262,7 +281,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	if (skb->len != sizeof(struct hci_rp_read_local_version)) {
-@@ -1639,18 +1823,123 @@
+@@ -1639,18 +1835,123 @@
  
  	rp = (struct hci_rp_read_local_version *)skb->data;
  
@@ -393,7 +412,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	kfree_skb(skb);
-@@ -3679,10 +3968,13 @@
+@@ -3679,10 +3980,13 @@
  	hdev->bus = HCI_USB;
  	hci_set_drvdata(hdev, data);
  
@@ -407,7 +426,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  
  	data->hdev = hdev;
  
-@@ -3854,11 +4146,15 @@
+@@ -3854,11 +4158,15 @@
  		if (bcdDevice < 0x117)
  			set_bit(HCI_QUIRK_RESET_ON_CLOSE, &hdev->quirks);
  
@@ -426,7 +445,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	if (id->driver_info & BTUSB_SNIFFER) {
-@@ -4128,6 +4424,10 @@
+@@ -4128,6 +4436,10 @@
  module_param(reset, bool, 0644);
  MODULE_PARM_DESC(reset, "Send HCI reset command on initialization");
  

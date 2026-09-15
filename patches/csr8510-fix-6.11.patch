@@ -85,7 +85,26 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  static void btusb_qca_cmd_timeout(struct hci_dev *hdev)
  {
  	struct btusb_data *data = hci_get_drvdata(hdev);
-@@ -1350,6 +1405,10 @@
+@@ -1164,6 +1219,18 @@
+ 		}
+ 
+ 		if (!hci_skb_expect(skb)) {
++			/* Each chunk should correspond to at least 1 or more
++			 * events so if there are still bytes left that doesn't
++			 * constitute a new event this is likely a bug in the
++			 * controller.
++			 */
++			if (count && count < HCI_EVENT_HDR_SIZE) {
++				bt_dev_warn(data->hdev,
++					"Unexpected continuation: %d bytes",
++					count);
++				count = 0;
++			}
++
+ 			/* Complete frame */
+ 			btusb_recv_event(data, skb);
+ 			skb = NULL;
+@@ -1350,6 +1417,10 @@
  	if (urb->status == 0) {
  		hdev->stat.byte_rx += urb->actual_length;
  
@@ -96,7 +115,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  		if (btusb_recv_intr(data, urb->transfer_buffer,
  				    urb->actual_length) < 0) {
  			bt_dev_err(hdev, "corrupted event packet");
-@@ -1856,6 +1915,8 @@
+@@ -1856,6 +1927,8 @@
  	if (err < 0)
  		return err;
  
@@ -105,7 +124,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	/* Patching USB firmware files prior to starting any URBs of HCI path
  	 * It is more safe to use USB bulk channel for downloading USB patch
  	 */
-@@ -1929,6 +1990,8 @@
+@@ -1929,6 +2002,8 @@
  	btusb_stop_traffic(data);
  	btusb_free_frags(data);
  
@@ -114,7 +133,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	err = usb_autopm_get_interface(data->intf);
  	if (err < 0)
  		goto failed;
-@@ -2354,6 +2417,97 @@
+@@ -2354,6 +2429,97 @@
  	return 0;
  }
  
@@ -212,7 +231,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  static int btusb_setup_csr(struct hci_dev *hdev)
  {
  	struct btusb_data *data = hci_get_drvdata(hdev);
-@@ -2368,9 +2522,15 @@
+@@ -2368,9 +2534,15 @@
  	skb = __hci_cmd_sync(hdev, HCI_OP_READ_LOCAL_VERSION, 0, NULL,
  			     HCI_INIT_TIMEOUT);
  	if (IS_ERR(skb)) {
@@ -231,7 +250,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	rp = skb_pull_data(skb, sizeof(*rp));
-@@ -2442,6 +2602,7 @@
+@@ -2442,6 +2614,7 @@
  
  	if (is_fake) {
  		bt_dev_warn(hdev, "CSR: Unbranded CSR clone detected; adding workarounds and force-suspending once...");
@@ -239,7 +258,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  
  		/* Generally these clones have big discrepancies between
  		 * advertised features and what's actually supported.
-@@ -2453,6 +2614,16 @@
+@@ -2453,6 +2626,16 @@
  		set_bit(HCI_QUIRK_BROKEN_FILTER_CLEAR_ALL, &hdev->quirks);
  		set_bit(HCI_QUIRK_NO_SUSPEND_NOTIFIER, &hdev->quirks);
  
@@ -256,7 +275,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  		/* Clear the reset quirk since this is not an actual
  		 * early Bluetooth 1.1 device from CSR.
  		 */
-@@ -2479,23 +2650,52 @@
+@@ -2479,23 +2662,52 @@
  		 * To fix 2. clear the HCI's can_wake flag, this way the HCI
  		 * will still be autosuspended when it is not open.
  		 *
@@ -315,7 +334,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  
  		/* Re-enable autosuspend if this was requested */
  		if (enable_autosuspend)
-@@ -3977,8 +4177,10 @@
+@@ -3977,8 +4189,10 @@
  
  		/* Fake CSR devices with broken commands */
  		if (le16_to_cpu(udev->descriptor.idVendor)  == 0x0a12 &&
@@ -327,7 +346,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	if (id->driver_info & BTUSB_SNIFFER) {
-@@ -4281,6 +4483,10 @@
+@@ -4281,6 +4495,10 @@
  module_param(reset, bool, 0644);
  MODULE_PARM_DESC(reset, "Send HCI reset command on initialization");
  

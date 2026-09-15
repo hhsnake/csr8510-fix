@@ -261,15 +261,17 @@ When reporting, please attach the output of `uname -r`,
 
 ## Credits
 
-Derived from the kernel's own `drivers/bluetooth/btusb.c`. Upstream work this
-builds on:
-
-* `btusb.c` itself — Marcel Holtmann and the Linux Bluetooth subsystem
-  contributors.
-* the fake-CSR detection (*"Unbranded CSR clone detected"* and the table of
-  known fake `bcdDevice` values) — Ismael Ferreras Morezuelas.
-* the force-suspend workaround for the Barrot 8041a02 receive issue — Hans de
-  Goede.
+* Ismael Ferreras Morezuelas ([@Swyter](https://github.com/Swyter)) — clone
+  detection, the fake `bcdDevice` table, the generic force-suspend workaround
+  (`cde1a8a99287`, `f4292e2faf52`, `b3cf94c8b6b2`, `42d7731e3e74`). The comments
+  in `btusb_setup_csr()` are his, and this README paraphrases them.
+* Hans de Goede — Barrot 8041a02 remote-wakeup workaround (`0671c0662383`).
+* Pedro Nishiyama — the broken-command quirks for 0x0c25/0x0c46 (`1f04b0e5e3b9`, v6.15).
+* Arkadiusz Bokowy — the trailing-byte defrag check (`7722d6fb54e4`, v6.18).
+* Marcel Holtmann, Luiz Augusto von Dentz and the linux-bluetooth contributors.
+* Kernel [bugzilla #60824](https://bugzilla.kernel.org/show_bug.cgi?id=60824)
+  and [nevack's gist](https://gist.github.com/nevack/6b36b82d715dc025163d9e9124840a07),
+  where the `bcdDevice` values and HCI traces were collected.
 
 ## License
 

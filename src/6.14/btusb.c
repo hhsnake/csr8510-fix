@@ -948,7 +948,12 @@ static void btusb_reset(struct hci_dev *hdev)
 	int err;
 
 	data = hci_get_drvdata(hdev);
-	/* This is not an unbalanced PM reference since the device will reset */
+	/* Keep the device awake until the queued reset runs. The reference has
+	 * to be given back: the reset unbinds and rebinds the interface, and
+	 * usb_unbind_interface() does not undo autopm references, so leaking it
+	 * leaves usage_count at 1 forever - which makes autosuspend_check()
+	 * refuse every later one-shot suspend that fake CSR clones need.
+	 */
 	err = usb_autopm_get_interface(data->intf);
 	if (err) {
 		bt_dev_err(hdev, "Failed usb_autopm_get_interface: %d", err);
@@ -957,6 +962,7 @@ static void btusb_reset(struct hci_dev *hdev)
 
 	bt_dev_err(hdev, "Resetting usb device.");
 	usb_queue_reset_device(data->intf);
+	usb_autopm_put_interface_no_suspend(data->intf);
 }
 
 static void btusb_intel_reset(struct hci_dev *hdev)
@@ -2571,11 +2577,13 @@ static void btusb_log_csr_pm_state(struct hci_dev *hdev, struct btusb_data *data
 				   const char *stage, int ret)
 {
 	bt_dev_info(hdev,
-		    "CSR: %s: ret=%d enabled=%d suspended=%d usage=%d child=%d nrw=%d wakeup_capable=%d",
+		    "CSR: %s: ret=%d enabled=%d suspended=%d usage=%d child=%d intf=%d isoc=%d nrw=%d wakeup_capable=%d",
 		    stage, ret, pm_runtime_enabled(&data->udev->dev),
 		    pm_runtime_status_suspended(&data->udev->dev),
 		    atomic_read(&data->udev->dev.power.usage_count),
 		    atomic_read(&data->udev->dev.power.child_count),
+		    atomic_read(&data->intf->dev.power.usage_count),
+		    data->isoc ? atomic_read(&data->isoc->dev.power.usage_count) : -1,
 		    data->intf->needs_remote_wakeup,
 		    device_can_wakeup(&data->udev->dev));
 }
@@ -2673,6 +2681,8 @@ static int btusb_setup_csr(struct hci_dev *hdev)
 		is_fake = true;
 
 	if (is_fake) {
+		int waited;
+
 		bt_dev_warn(hdev, "CSR: Unbranded CSR clone detected; adding workarounds and force-suspending once...");
 		set_bit(BTUSB_FAKE_CSR, &data->flags);
 
@@ -2728,15 +2738,19 @@ static int btusb_setup_csr(struct hci_dev *hdev)
 		pm_runtime_allow(&data->udev->dev);
 		btusb_log_csr_pm_state(hdev, data, "after allow", 0);
 
-		/* autosuspend_check() refuses while an interface has
-		 * needs_remote_wakeup set on a device with no wakeup
-		 * capability, and btusb_open() also holds an autopm
-		 * reference on it. Drop both across the cycle.
+		/* autosuspend_check() refuses while an interface needs remote
+		 * wakeup or holds an autopm reference. Any reference here is
+		 * usb_probe_interface()'s, held across probe, so wait for it
+		 * to go rather than drop a reference we do not own.
 		 */
+		data->intf->needs_remote_wakeup = 0;
+		for (waited = 0; waited < 200 &&
+		     atomic_read(&data->intf->dev.power.usage_count); waited += 10)
+			msleep(10);
+		if (atomic_read(&data->intf->dev.power.usage_count))
+			bt_dev_warn(hdev, "CSR: interface still busy after %d ms", waited);
 		btusb_log_csr_pm_state(hdev, data, "pre-suspend", 0);
 
-		data->intf->needs_remote_wakeup = 0;
-		usb_autopm_put_interface(data->intf);
 		ret = pm_runtime_force_suspend(&data->udev->dev);
 		if (ret < 0) {
 			/* Transient -EBUSY during boot; retry once. */
@@ -2744,8 +2758,11 @@ static int btusb_setup_csr(struct hci_dev *hdev)
 			msleep(100);
 			ret = pm_runtime_force_suspend(&data->udev->dev);
 		}
-		if (usb_autopm_get_interface(data->intf) < 0)
-			bt_dev_warn(hdev, "CSR: could not retake the interface reference");
+		/* Wake the device back up right away. Clones come back with a
+		 * half-dead radio if they are left suspended for long.
+		 */
+		if (usb_autopm_get_interface(data->intf) == 0)
+			usb_autopm_put_interface_no_suspend(data->intf);
 		data->intf->needs_remote_wakeup = 1;
 
 		btusb_log_csr_pm_state(hdev, data, "after force_suspend", ret);

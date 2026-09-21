@@ -34,13 +34,14 @@ chip but return malformed HCI responses. Known fake `bcdDevice` values:
 detects them (*"Unbranded CSR clone detected"*) but its workarounds are not
 enough for this hardware. This patch additionally:
 
-* stops the two commands these clones answer with a truncated payload
-  (`Read Voice Setting` 0x0c25, `Read Page Scan Type` 0x0c46) from ever being
-  sent, by clearing their bits in the Supported Commands bitmap the clone
-  advertises — the same thing CSR's own Windows driver does by never asking;
-* still pads an undersized Command Complete if one arrives anyway, as a
-  fallback (also covers `Read Transmit Power Level` 0x0c2d, which is not
-  gated by that bitmap);
+* stops `Read Page Scan Type` 0x0c46 — which these clones answer with a
+  truncated payload — from ever being sent, by clearing its bit in the
+  Supported Commands bitmap the clone advertises;
+* pads the undersized Command Complete payloads the clones return for
+  `Read Voice Setting` 0x0c25, `Read Transmit Power Level` 0x0c2d and
+  0x0c46. 0x0c25 is deliberately left advertised: since v6.15 the core
+  treats an unsupported Read Voice Setting as "no SCO" and zeroes the SCO
+  buffer count, which disables HFP audio;
 * fixes the fragile USB runtime-PM suspend workaround;
 * auto-recovers with a USB reset from init failures and command timeouts,
   including a dongle that answers nothing at all — not even the very first
@@ -170,7 +171,7 @@ sudo ./uninstall.sh
 | `src/5.19` | 5.19 – 6.1  | 5.19.0-50-generic (Ubuntu 22.04); 6.1.175-1.el7.3 (RED OS 7.3.7); 6.1.0-53-amd64 (Debian 12) |
 | `src/6.2`  | 6.2 – 6.4   | 6.2.0-39-generic (Ubuntu 22.04) |
 | `src/6.5`  | 6.5 – 6.7   | 6.5.0-45-generic (Ubuntu 22.04) |
-| `src/6.8`  | 6.8 – 6.10  | 6.8.0-94, 6.8.0-134-generic (Ubuntu 22.04) |
+| `src/6.8`  | 6.8 – 6.10  | 6.8.0-94, 6.8.0-134, 6.8.0-138-generic (Ubuntu 22.04) |
 | `src/6.11` | 6.11 – 6.13 | 6.11.0-29-generic (Ubuntu 24.04); 6.11.4-301.fc41 (Fedora 41); 6.12.92-1.red80 (RED OS 8.0.3); 6.12.101+deb12-amd64 (Debian 12 backports); 6.12.107+deb13-amd64 (Debian 13) |
 | `src/6.14` | 6.14 – 6.16 | 6.14.0-37-generic (Ubuntu 24.04); 6.16.12-valve24.5-1-neptune-616 (SteamOS 3.8.14) |
 | `src/6.17` | ≥ 6.17      | 6.17.0-35-generic, 7.0.0-14-generic (Ubuntu 24.04); 6.17.10-100.fc41 (Fedora 41); 6.19.10-300.fc44, 7.1.4-200.fc44 (Fedora 44); 7.1.4-arch1-1, 6.18.39-1-lts, 7.1.4-zen1-1 (Arch), 7.1.8-1-cachyos |

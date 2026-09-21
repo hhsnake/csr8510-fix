@@ -157,15 +157,14 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	err = usb_autopm_get_interface(data->intf);
  	if (err < 0)
  		goto failed;
-@@ -1616,19 +1711,120 @@
+@@ -1616,19 +1711,116 @@
  	return 0;
  }
  
-+/* Clear the Supported Commands bits these clones advertise but cannot
-+ * honour, so the core stops issuing them:
-+ *
-+ *   commands[9]  & 0x04  Read Voice Setting  (0x0c25)
-+ *   commands[13] & 0x01  Read Page Scan Type (0x0c46)
++/* Clear the Supported Commands bit for Read Page Scan Type (0x0c46), so the
++ * core stops issuing it. Read Voice Setting (0x0c25) is deliberately left
++ * advertised: the core reads it as "no SCO" and zeroes sco_pkts, which kills
++ * HFP. Its short reply is padded in btusb_recv_event_csr() instead.
 + */
 +static void btusb_csr_mask_commands(struct hci_dev *hdev, struct sk_buff *skb)
 +{
@@ -180,14 +179,11 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
 +	if (rp->status)
 +		return;
 +
-+	if (!(rp->commands[9] & 0x04) && !(rp->commands[13] & 0x01))
++	if (!(rp->commands[13] & 0x01))
 +		return;
 +
-+	bt_dev_info(hdev, "CSR: clearing advertised support for%s%s",
-+		    rp->commands[9]  & 0x04 ? " Read Voice Setting" : "",
-+		    rp->commands[13] & 0x01 ? " Read Page Scan Type" : "");
++	bt_dev_info(hdev, "CSR: clearing advertised support for Read Page Scan Type");
 +
-+	rp->commands[9]  &= ~0x04;
 +	rp->commands[13] &= ~0x01;
 +}
 +
@@ -281,7 +277,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	if (skb->len != sizeof(struct hci_rp_read_local_version)) {
-@@ -1639,18 +1835,123 @@
+@@ -1639,18 +1831,120 @@
  
  	rp = (struct hci_rp_read_local_version *)skb->data;
  
@@ -345,10 +341,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
 +		set_bit(HCI_QUIRK_BROKEN_ERR_DATA_REPORTING, &hdev->quirks);
 +#endif
 +
-+		/* Probed for at build time; distro kernels backport these. */
-+#ifdef HAVE_HCI_QUIRK_BROKEN_READ_VOICE_SETTING
-+		set_bit(HCI_QUIRK_BROKEN_READ_VOICE_SETTING, &hdev->quirks);
-+#endif
++		/* Probed for at build time; distro kernels backport it. */
 +#ifdef HAVE_HCI_QUIRK_BROKEN_READ_PAGE_SCAN_TYPE
 +		set_bit(HCI_QUIRK_BROKEN_READ_PAGE_SCAN_TYPE, &hdev->quirks);
 +#endif
@@ -412,7 +405,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	kfree_skb(skb);
-@@ -3679,10 +3980,13 @@
+@@ -3679,10 +3973,13 @@
  	hdev->bus = HCI_USB;
  	hci_set_drvdata(hdev, data);
  
@@ -426,7 +419,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  
  	data->hdev = hdev;
  
-@@ -3854,11 +4158,15 @@
+@@ -3854,11 +4151,15 @@
  		if (bcdDevice < 0x117)
  			set_bit(HCI_QUIRK_RESET_ON_CLOSE, &hdev->quirks);
  
@@ -445,7 +438,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	if (id->driver_info & BTUSB_SNIFFER) {
-@@ -4128,6 +4436,10 @@
+@@ -4128,6 +4429,10 @@
  module_param(reset, bool, 0644);
  MODULE_PARM_DESC(reset, "Send HCI reset command on initialization");
  

@@ -2429,11 +2429,10 @@ static int btusb_setup_bcm92035(struct hci_dev *hdev)
 	return 0;
 }
 
-/* Clear the Supported Commands bits these clones advertise but cannot
- * honour, so the core stops issuing them:
- *
- *   commands[9]  & 0x04  Read Voice Setting  (0x0c25)
- *   commands[13] & 0x01  Read Page Scan Type (0x0c46)
+/* Clear the Supported Commands bit for Read Page Scan Type (0x0c46), so the
+ * core stops issuing it. Read Voice Setting (0x0c25) is deliberately left
+ * advertised: the core reads it as "no SCO" and zeroes sco_pkts, which kills
+ * HFP. Its short reply is padded in btusb_recv_event_csr() instead.
  */
 static void btusb_csr_mask_commands(struct hci_dev *hdev, struct sk_buff *skb)
 {
@@ -2448,14 +2447,11 @@ static void btusb_csr_mask_commands(struct hci_dev *hdev, struct sk_buff *skb)
 	if (rp->status)
 		return;
 
-	if (!(rp->commands[9] & 0x04) && !(rp->commands[13] & 0x01))
+	if (!(rp->commands[13] & 0x01))
 		return;
 
-	bt_dev_info(hdev, "CSR: clearing advertised support for%s%s",
-		    rp->commands[9]  & 0x04 ? " Read Voice Setting" : "",
-		    rp->commands[13] & 0x01 ? " Read Page Scan Type" : "");
+	bt_dev_info(hdev, "CSR: clearing advertised support for Read Page Scan Type");
 
-	rp->commands[9]  &= ~0x04;
 	rp->commands[13] &= ~0x01;
 }
 
@@ -2626,10 +2622,7 @@ static int btusb_setup_csr(struct hci_dev *hdev)
 		set_bit(HCI_QUIRK_BROKEN_FILTER_CLEAR_ALL, &hdev->quirks);
 		set_bit(HCI_QUIRK_NO_SUSPEND_NOTIFIER, &hdev->quirks);
 
-		/* Probed for at build time; distro kernels backport these. */
-#ifdef HAVE_HCI_QUIRK_BROKEN_READ_VOICE_SETTING
-		set_bit(HCI_QUIRK_BROKEN_READ_VOICE_SETTING, &hdev->quirks);
-#endif
+		/* Probed for at build time; distro kernels backport it. */
 #ifdef HAVE_HCI_QUIRK_BROKEN_READ_PAGE_SCAN_TYPE
 		set_bit(HCI_QUIRK_BROKEN_READ_PAGE_SCAN_TYPE, &hdev->quirks);
 #endif

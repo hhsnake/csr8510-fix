@@ -133,15 +133,14 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	err = usb_autopm_get_interface(data->intf);
  	if (err < 0)
  		goto failed;
-@@ -2354,6 +2429,97 @@
+@@ -2354,6 +2429,93 @@
  	return 0;
  }
  
-+/* Clear the Supported Commands bits these clones advertise but cannot
-+ * honour, so the core stops issuing them:
-+ *
-+ *   commands[9]  & 0x04  Read Voice Setting  (0x0c25)
-+ *   commands[13] & 0x01  Read Page Scan Type (0x0c46)
++/* Clear the Supported Commands bit for Read Page Scan Type (0x0c46), so the
++ * core stops issuing it. Read Voice Setting (0x0c25) is deliberately left
++ * advertised: the core reads it as "no SCO" and zeroes sco_pkts, which kills
++ * HFP. Its short reply is padded in btusb_recv_event_csr() instead.
 + */
 +static void btusb_csr_mask_commands(struct hci_dev *hdev, struct sk_buff *skb)
 +{
@@ -156,14 +155,11 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
 +	if (rp->status)
 +		return;
 +
-+	if (!(rp->commands[9] & 0x04) && !(rp->commands[13] & 0x01))
++	if (!(rp->commands[13] & 0x01))
 +		return;
 +
-+	bt_dev_info(hdev, "CSR: clearing advertised support for%s%s",
-+		    rp->commands[9]  & 0x04 ? " Read Voice Setting" : "",
-+		    rp->commands[13] & 0x01 ? " Read Page Scan Type" : "");
++	bt_dev_info(hdev, "CSR: clearing advertised support for Read Page Scan Type");
 +
-+	rp->commands[9]  &= ~0x04;
 +	rp->commands[13] &= ~0x01;
 +}
 +
@@ -231,7 +227,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  static int btusb_setup_csr(struct hci_dev *hdev)
  {
  	struct btusb_data *data = hci_get_drvdata(hdev);
-@@ -2368,9 +2534,15 @@
+@@ -2368,9 +2530,15 @@
  	skb = __hci_cmd_sync(hdev, HCI_OP_READ_LOCAL_VERSION, 0, NULL,
  			     HCI_INIT_TIMEOUT);
  	if (IS_ERR(skb)) {
@@ -250,7 +246,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	rp = skb_pull_data(skb, sizeof(*rp));
-@@ -2442,6 +2614,7 @@
+@@ -2442,6 +2610,7 @@
  
  	if (is_fake) {
  		bt_dev_warn(hdev, "CSR: Unbranded CSR clone detected; adding workarounds and force-suspending once...");
@@ -258,14 +254,11 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  
  		/* Generally these clones have big discrepancies between
  		 * advertised features and what's actually supported.
-@@ -2453,6 +2626,16 @@
+@@ -2453,6 +2622,13 @@
  		set_bit(HCI_QUIRK_BROKEN_FILTER_CLEAR_ALL, &hdev->quirks);
  		set_bit(HCI_QUIRK_NO_SUSPEND_NOTIFIER, &hdev->quirks);
  
-+		/* Probed for at build time; distro kernels backport these. */
-+#ifdef HAVE_HCI_QUIRK_BROKEN_READ_VOICE_SETTING
-+		set_bit(HCI_QUIRK_BROKEN_READ_VOICE_SETTING, &hdev->quirks);
-+#endif
++		/* Probed for at build time; distro kernels backport it. */
 +#ifdef HAVE_HCI_QUIRK_BROKEN_READ_PAGE_SCAN_TYPE
 +		set_bit(HCI_QUIRK_BROKEN_READ_PAGE_SCAN_TYPE, &hdev->quirks);
 +#endif
@@ -275,7 +268,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  		/* Clear the reset quirk since this is not an actual
  		 * early Bluetooth 1.1 device from CSR.
  		 */
-@@ -2479,23 +2662,52 @@
+@@ -2479,23 +2655,52 @@
  		 * To fix 2. clear the HCI's can_wake flag, this way the HCI
  		 * will still be autosuspended when it is not open.
  		 *
@@ -334,7 +327,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  
  		/* Re-enable autosuspend if this was requested */
  		if (enable_autosuspend)
-@@ -3977,8 +4189,10 @@
+@@ -3977,8 +4182,10 @@
  
  		/* Fake CSR devices with broken commands */
  		if (le16_to_cpu(udev->descriptor.idVendor)  == 0x0a12 &&
@@ -346,7 +339,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	if (id->driver_info & BTUSB_SNIFFER) {
-@@ -4281,6 +4495,10 @@
+@@ -4281,6 +4488,10 @@
  module_param(reset, bool, 0644);
  MODULE_PARM_DESC(reset, "Send HCI reset command on initialization");
  

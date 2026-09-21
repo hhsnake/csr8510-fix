@@ -95,12 +95,14 @@ Cambridge Silicon Radio chip but return malformed HCI responses.</p>
 <p>The stock kernel already detects them (<em>“Unbranded CSR clone detected”</em>),
 but its workarounds are not enough for this hardware. This patch additionally:</p>
 <ul>
-<li>stops the two commands these clones answer with a truncated payload —
-Read Voice Setting <code>0x0c25</code>, Read Page Scan Type
-<code>0x0c46</code> — from ever being sent, by clearing their bits in the
-Supported Commands bitmap the clone advertises;</li>
-<li>still pads an undersized Command Complete if one arrives anyway, as a
-fallback (also covers Read Transmit Power Level <code>0x0c2d</code>);</li>
+<li>stops Read Page Scan Type <code>0x0c46</code> &mdash; which these clones
+answer with a truncated payload &mdash; from ever being sent, by clearing its
+bit in the Supported Commands bitmap the clone advertises;</li>
+<li>pads the undersized Command Complete payloads returned for Read Voice
+Setting <code>0x0c25</code>, Read Transmit Power Level <code>0x0c2d</code>
+and <code>0x0c46</code>. <code>0x0c25</code> is left advertised on purpose:
+since v6.15 the core reads an unsupported Read Voice Setting as &ldquo;no
+SCO&rdquo; and zeroes the SCO buffer count, disabling HFP audio;</li>
 <li>fixes the fragile USB runtime-PM force-suspend workaround;</li>
 <li>auto-recovers with a USB reset from init failures and command timeouts,
 including a dongle that answers nothing at all — not even the very first

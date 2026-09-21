@@ -136,15 +136,14 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	err = usb_autopm_get_interface(data->intf);
  	if (err < 0)
  		goto failed;
-@@ -1919,6 +2005,97 @@
+@@ -1919,6 +2005,93 @@
  	return 0;
  }
  
-+/* Clear the Supported Commands bits these clones advertise but cannot
-+ * honour, so the core stops issuing them:
-+ *
-+ *   commands[9]  & 0x04  Read Voice Setting  (0x0c25)
-+ *   commands[13] & 0x01  Read Page Scan Type (0x0c46)
++/* Clear the Supported Commands bit for Read Page Scan Type (0x0c46), so the
++ * core stops issuing it. Read Voice Setting (0x0c25) is deliberately left
++ * advertised: the core reads it as "no SCO" and zeroes sco_pkts, which kills
++ * HFP. Its short reply is padded in btusb_recv_event_csr() instead.
 + */
 +static void btusb_csr_mask_commands(struct hci_dev *hdev, struct sk_buff *skb)
 +{
@@ -159,14 +158,11 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
 +	if (rp->status)
 +		return;
 +
-+	if (!(rp->commands[9] & 0x04) && !(rp->commands[13] & 0x01))
++	if (!(rp->commands[13] & 0x01))
 +		return;
 +
-+	bt_dev_info(hdev, "CSR: clearing advertised support for%s%s",
-+		    rp->commands[9]  & 0x04 ? " Read Voice Setting" : "",
-+		    rp->commands[13] & 0x01 ? " Read Page Scan Type" : "");
++	bt_dev_info(hdev, "CSR: clearing advertised support for Read Page Scan Type");
 +
-+	rp->commands[9]  &= ~0x04;
 +	rp->commands[13] &= ~0x01;
 +}
 +
@@ -234,7 +230,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  static int btusb_setup_csr(struct hci_dev *hdev)
  {
  	struct btusb_data *data = hci_get_drvdata(hdev);
-@@ -1933,9 +2110,15 @@
+@@ -1933,9 +2106,15 @@
  	skb = __hci_cmd_sync(hdev, HCI_OP_READ_LOCAL_VERSION, 0, NULL,
  			     HCI_INIT_TIMEOUT);
  	if (IS_ERR(skb)) {
@@ -253,7 +249,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	if (skb->len != sizeof(struct hci_rp_read_local_version)) {
-@@ -2006,6 +2189,7 @@
+@@ -2006,6 +2185,7 @@
  
  	if (is_fake) {
  		bt_dev_warn(hdev, "CSR: Unbranded CSR clone detected; adding workarounds and force-suspending once...");
@@ -261,14 +257,11 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  
  		/* Generally these clones have big discrepancies between
  		 * advertised features and what's actually supported.
-@@ -2015,6 +2199,16 @@
+@@ -2015,6 +2195,13 @@
  		set_bit(HCI_QUIRK_BROKEN_STORED_LINK_KEY, &hdev->quirks);
  		set_bit(HCI_QUIRK_BROKEN_ERR_DATA_REPORTING, &hdev->quirks);
  
-+		/* Probed for at build time; distro kernels backport these. */
-+#ifdef HAVE_HCI_QUIRK_BROKEN_READ_VOICE_SETTING
-+		set_bit(HCI_QUIRK_BROKEN_READ_VOICE_SETTING, &hdev->quirks);
-+#endif
++		/* Probed for at build time; distro kernels backport it. */
 +#ifdef HAVE_HCI_QUIRK_BROKEN_READ_PAGE_SCAN_TYPE
 +		set_bit(HCI_QUIRK_BROKEN_READ_PAGE_SCAN_TYPE, &hdev->quirks);
 +#endif
@@ -278,7 +271,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  		/* Clear the reset quirk since this is not an actual
  		 * early Bluetooth 1.1 device from CSR.
  		 */
-@@ -2041,23 +2235,52 @@
+@@ -2041,23 +2228,52 @@
  		 * To fix 2. clear the HCI's can_wake flag, this way the HCI
  		 * will still be autosuspended when it is not open.
  		 *
@@ -337,7 +330,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  
  		/* Re-enable autosuspend if this was requested */
  		if (enable_autosuspend)
-@@ -3948,10 +4171,13 @@
+@@ -3948,10 +4164,13 @@
  	hdev->bus = HCI_USB;
  	hci_set_drvdata(hdev, data);
  
@@ -351,7 +344,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  
  	data->hdev = hdev;
  
-@@ -4148,8 +4374,10 @@
+@@ -4148,8 +4367,10 @@
  
  		/* Fake CSR devices with broken commands */
  		if (le16_to_cpu(udev->descriptor.idVendor)  == 0x0a12 &&
@@ -363,7 +356,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	if (id->driver_info & BTUSB_SNIFFER) {
-@@ -4421,6 +4649,10 @@
+@@ -4421,6 +4642,10 @@
  module_param(reset, bool, 0644);
  MODULE_PARM_DESC(reset, "Send HCI reset command on initialization");
  

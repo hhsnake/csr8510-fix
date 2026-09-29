@@ -632,6 +632,7 @@ static const struct dmi_system_id btusb_needs_reset_resume_table[] = {
 #define BTUSB_USE_ALT3_FOR_WBS	15
 #define BTUSB_FAKE_CSR		16
 #define BTUSB_CSR_EVENT_SEEN	17
+#define BTUSB_RESET		18
 
 struct btusb_data {
 	struct hci_dev       *hdev;
@@ -757,21 +758,18 @@ static void btusb_reset(struct hci_dev *hdev)
 	struct btusb_data *data = hci_get_drvdata(hdev);
 	int err;
 
-	/* Keep the device awake until the queued reset runs. The reference has
-	 * to be given back: the reset unbinds and rebinds the interface, and
-	 * usb_unbind_interface() does not undo autopm references, so leaking it
-	 * leaves usage_count at 1 forever - which makes autosuspend_check()
-	 * refuse every later one-shot suspend that fake CSR clones need.
-	 */
 	err = usb_autopm_get_interface(data->intf);
 	if (err) {
 		bt_dev_err(hdev, "Failed usb_autopm_get_interface: %d", err);
 		return;
 	}
 
+	/* btusb_disconnect() drops it once the reset has unbound us */
+	if (test_and_set_bit(BTUSB_RESET, &data->flags))
+		usb_autopm_put_interface_no_suspend(data->intf);
+
 	bt_dev_err(hdev, "Resetting usb device.");
 	usb_queue_reset_device(data->intf);
-	usb_autopm_put_interface_no_suspend(data->intf);
 }
 
 static void btusb_csr_cmd_timeout(struct hci_dev *hdev)
@@ -4468,6 +4466,9 @@ static void btusb_disconnect(struct usb_interface *intf)
 		device_init_wakeup(&data->udev->dev, false);
 	if (data->reset_gpio)
 		gpiod_put(data->reset_gpio);
+
+	if (test_and_clear_bit(BTUSB_RESET, &data->flags))
+		usb_autopm_put_interface_no_suspend(data->intf);
 
 	if (intf == data->intf) {
 		if (data->isoc)

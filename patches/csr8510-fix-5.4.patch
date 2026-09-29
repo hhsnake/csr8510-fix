@@ -30,16 +30,17 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  
  static struct usb_driver btusb_driver;
  
-@@ -439,6 +449,8 @@
+@@ -439,6 +449,9 @@
  #define BTUSB_HW_RESET_ACTIVE	12
  #define BTUSB_TX_WAIT_VND_EVT	13
  #define BTUSB_WAKEUP_DISABLE	14
 +#define BTUSB_FAKE_CSR		15
 +#define BTUSB_CSR_EVENT_SEEN	16
++#define BTUSB_RESET		17
  
  struct btusb_data {
  	struct hci_dev       *hdev;
-@@ -496,6 +508,75 @@
+@@ -496,6 +509,72 @@
  };
  
  
@@ -48,21 +49,18 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
 +	struct btusb_data *data = hci_get_drvdata(hdev);
 +	int err;
 +
-+	/* Keep the device awake until the queued reset runs. The reference has
-+	 * to be given back: the reset unbinds and rebinds the interface, and
-+	 * usb_unbind_interface() does not undo autopm references, so leaking it
-+	 * leaves usage_count at 1 forever - which makes autosuspend_check()
-+	 * refuse every later one-shot suspend that fake CSR clones need.
-+	 */
 +	err = usb_autopm_get_interface(data->intf);
 +	if (err) {
 +		bt_dev_err(hdev, "Failed usb_autopm_get_interface: %d", err);
 +		return;
 +	}
 +
++	/* btusb_disconnect() drops it once the reset has unbound us */
++	if (test_and_set_bit(BTUSB_RESET, &data->flags))
++		usb_autopm_put_interface_no_suspend(data->intf);
++
 +	bt_dev_err(hdev, "Resetting usb device.");
 +	usb_queue_reset_device(data->intf);
-+	usb_autopm_put_interface_no_suspend(data->intf);
 +}
 +
 +static void btusb_csr_cmd_timeout(struct hci_dev *hdev)
@@ -115,7 +113,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  static void btusb_intel_cmd_timeout(struct hci_dev *hdev)
  {
  	struct btusb_data *data = hci_get_drvdata(hdev);
-@@ -619,6 +700,18 @@
+@@ -619,6 +698,18 @@
  		}
  
  		if (!hci_skb_expect(skb)) {
@@ -134,7 +132,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  			/* Complete frame */
  			data->recv_event(data->hdev, skb);
  			skb = NULL;
-@@ -760,6 +853,10 @@
+@@ -760,6 +851,10 @@
  	if (urb->status == 0) {
  		hdev->stat.byte_rx += urb->actual_length;
  
@@ -145,7 +143,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  		if (btusb_recv_intr(data, urb->transfer_buffer,
  				    urb->actual_length) < 0) {
  			bt_dev_err(hdev, "corrupted event packet");
-@@ -1194,6 +1291,8 @@
+@@ -1194,6 +1289,8 @@
  	if (err < 0)
  		return err;
  
@@ -154,7 +152,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	/* Patching USB firmware files prior to starting any URBs of HCI path
  	 * It is more safe to use USB bulk channel for downloading USB patch
  	 */
-@@ -1270,6 +1369,8 @@
+@@ -1270,6 +1367,8 @@
  	btusb_stop_traffic(data);
  	btusb_free_frags(data);
  
@@ -163,7 +161,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	err = usb_autopm_get_interface(data->intf);
  	if (err < 0)
  		goto failed;
-@@ -1616,19 +1717,118 @@
+@@ -1616,19 +1715,118 @@
  	return 0;
  }
  
@@ -285,7 +283,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	if (skb->len != sizeof(struct hci_rp_read_local_version)) {
-@@ -1639,18 +1839,129 @@
+@@ -1639,18 +1837,129 @@
  
  	rp = (struct hci_rp_read_local_version *)skb->data;
  
@@ -422,7 +420,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	kfree_skb(skb);
-@@ -3679,10 +3990,13 @@
+@@ -3679,10 +3988,13 @@
  	hdev->bus = HCI_USB;
  	hci_set_drvdata(hdev, data);
  
@@ -436,7 +434,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  
  	data->hdev = hdev;
  
-@@ -3854,11 +4168,15 @@
+@@ -3854,11 +4166,15 @@
  		if (bcdDevice < 0x117)
  			set_bit(HCI_QUIRK_RESET_ON_CLOSE, &hdev->quirks);
  
@@ -455,7 +453,17 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	if (id->driver_info & BTUSB_SNIFFER) {
-@@ -4128,6 +4446,10 @@
+@@ -3957,6 +4273,9 @@
+ 	if (data->reset_gpio)
+ 		gpiod_put(data->reset_gpio);
+ 
++	if (test_and_clear_bit(BTUSB_RESET, &data->flags))
++		usb_autopm_put_interface_no_suspend(data->intf);
++
+ 	hci_free_dev(hdev);
+ }
+ 
+@@ -4128,6 +4447,10 @@
  module_param(reset, bool, 0644);
  MODULE_PARM_DESC(reset, "Send HCI reset command on initialization");
  

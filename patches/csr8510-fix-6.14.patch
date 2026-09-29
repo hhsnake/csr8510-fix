@@ -9,38 +9,35 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  static bool auto_isoc_alt = IS_ENABLED(CONFIG_BT_HCIBTUSB_AUTO_ISOC_ALT);
  
  static struct usb_driver btusb_driver;
-@@ -870,6 +871,8 @@
+@@ -870,6 +871,9 @@
  #define BTUSB_USE_ALT3_FOR_WBS	15
  #define BTUSB_ALT6_CONTINUOUS_TX	16
  #define BTUSB_HW_SSR_ACTIVE	17
 +#define BTUSB_FAKE_CSR		18
 +#define BTUSB_CSR_EVENT_SEEN	19
++#define BTUSB_RESET		20
  
  struct btusb_data {
  	struct hci_dev       *hdev;
-@@ -945,7 +948,12 @@
+@@ -945,13 +949,16 @@
  	int err;
  
  	data = hci_get_drvdata(hdev);
 -	/* This is not an unbalanced PM reference since the device will reset */
-+	/* Keep the device awake until the queued reset runs. The reference has
-+	 * to be given back: the reset unbinds and rebinds the interface, and
-+	 * usb_unbind_interface() does not undo autopm references, so leaking it
-+	 * leaves usage_count at 1 forever - which makes autosuspend_check()
-+	 * refuse every later one-shot suspend that fake CSR clones need.
-+	 */
  	err = usb_autopm_get_interface(data->intf);
  	if (err) {
  		bt_dev_err(hdev, "Failed usb_autopm_get_interface: %d", err);
-@@ -954,6 +962,7 @@
+ 		return;
+ 	}
  
++	/* btusb_disconnect() drops it once the reset has unbound us */
++	if (test_and_set_bit(BTUSB_RESET, &data->flags))
++		usb_autopm_put_interface_no_suspend(data->intf);
++
  	bt_dev_err(hdev, "Resetting usb device.");
  	usb_queue_reset_device(data->intf);
-+	usb_autopm_put_interface_no_suspend(data->intf);
  }
- 
- static void btusb_intel_reset(struct hci_dev *hdev)
-@@ -1078,6 +1087,53 @@
+@@ -1078,6 +1085,53 @@
  	btusb_rtl_alloc_devcoredump(hdev, &hdr, NULL, 0);
  }
  
@@ -94,7 +91,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  static void btusb_qca_reset(struct hci_dev *hdev)
  {
  	struct btusb_data *data = hci_get_drvdata(hdev);
-@@ -1224,6 +1280,18 @@
+@@ -1224,6 +1278,18 @@
  		}
  
  		if (!hci_skb_expect(skb)) {
@@ -113,7 +110,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  			/* Complete frame */
  			btusb_recv_event(data, skb);
  			skb = NULL;
-@@ -1410,6 +1478,10 @@
+@@ -1410,6 +1476,10 @@
  	if (urb->status == 0) {
  		hdev->stat.byte_rx += urb->actual_length;
  
@@ -124,7 +121,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  		if (btusb_recv_intr(data, urb->transfer_buffer,
  				    urb->actual_length) < 0) {
  			bt_dev_err(hdev, "corrupted event packet");
-@@ -1924,6 +1996,8 @@
+@@ -1924,6 +1994,8 @@
  	if (err < 0)
  		return err;
  
@@ -133,7 +130,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	/* Patching USB firmware files prior to starting any URBs of HCI path
  	 * It is more safe to use USB bulk channel for downloading USB patch
  	 */
-@@ -1997,6 +2071,8 @@
+@@ -1997,6 +2069,8 @@
  	btusb_stop_traffic(data);
  	btusb_free_frags(data);
  
@@ -142,7 +139,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	err = usb_autopm_get_interface(data->intf);
  	if (err < 0)
  		goto failed;
-@@ -2423,6 +2499,95 @@
+@@ -2423,6 +2497,95 @@
  	return 0;
  }
  
@@ -238,7 +235,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  static int btusb_setup_csr(struct hci_dev *hdev)
  {
  	struct btusb_data *data = hci_get_drvdata(hdev);
-@@ -2437,9 +2602,15 @@
+@@ -2437,9 +2600,15 @@
  	skb = __hci_cmd_sync(hdev, HCI_OP_READ_LOCAL_VERSION, 0, NULL,
  			     HCI_INIT_TIMEOUT);
  	if (IS_ERR(skb)) {
@@ -257,7 +254,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	rp = skb_pull_data(skb, sizeof(*rp));
-@@ -2510,7 +2681,10 @@
+@@ -2510,7 +2679,10 @@
  		is_fake = true;
  
  	if (is_fake) {
@@ -268,7 +265,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  
  		/* Generally these clones have big discrepancies between
  		 * advertised features and what's actually supported.
-@@ -2521,9 +2695,10 @@
+@@ -2521,9 +2693,10 @@
  		hci_set_quirk(hdev, HCI_QUIRK_BROKEN_ERR_DATA_REPORTING);
  		hci_set_quirk(hdev, HCI_QUIRK_BROKEN_FILTER_CLEAR_ALL);
  		hci_set_quirk(hdev, HCI_QUIRK_NO_SUSPEND_NOTIFIER);
@@ -280,7 +277,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  		/* Clear the reset quirk since this is not an actual
  		 * early Bluetooth 1.1 device from CSR.
  		 */
-@@ -2550,23 +2725,59 @@
+@@ -2550,23 +2723,59 @@
  		 * To fix 2. clear the HCI's can_wake flag, this way the HCI
  		 * will still be autosuspended when it is not open.
  		 *
@@ -296,9 +293,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
 +		btusb_log_csr_pm_state(hdev, data, "before allow", 0);
  		pm_runtime_allow(&data->udev->dev);
 +		btusb_log_csr_pm_state(hdev, data, "after allow", 0);
- 
--		ret = pm_runtime_suspend(&data->udev->dev);
--		if (ret >= 0)
++
 +		/* autosuspend_check() refuses while an interface needs remote
 +		 * wakeup or holds an autopm reference. Any reference here is
 +		 * usb_probe_interface()'s, held across probe, so wait for it
@@ -311,7 +306,9 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
 +		if (atomic_read(&data->intf->dev.power.usage_count))
 +			bt_dev_warn(hdev, "CSR: interface still busy after %d ms", waited);
 +		btusb_log_csr_pm_state(hdev, data, "pre-suspend", 0);
-+
+ 
+-		ret = pm_runtime_suspend(&data->udev->dev);
+-		if (ret >= 0)
 +		ret = pm_runtime_force_suspend(&data->udev->dev);
 +		if (ret < 0) {
 +			/* Transient -EBUSY during boot; retry once. */
@@ -346,7 +343,7 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  
  		/* Re-enable autosuspend if this was requested */
  		if (enable_autosuspend)
-@@ -4175,8 +4386,10 @@
+@@ -4175,8 +4384,10 @@
  
  		/* Fake CSR devices with broken commands */
  		if (le16_to_cpu(udev->descriptor.idVendor)  == 0x0a12 &&
@@ -358,7 +355,17 @@ diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
  	}
  
  	if (id->driver_info & BTUSB_SNIFFER) {
-@@ -4490,6 +4703,10 @@
+@@ -4287,6 +4498,9 @@
+ 	if (data->reset_gpio)
+ 		gpiod_put(data->reset_gpio);
+ 
++	if (test_and_clear_bit(BTUSB_RESET, &data->flags))
++		usb_autopm_put_interface_no_suspend(data->intf);
++
+ 	hci_free_dev(hdev);
+ }
+ 
+@@ -4490,6 +4704,10 @@
  module_param(reset, bool, 0644);
  MODULE_PARM_DESC(reset, "Send HCI reset command on initialization");
  

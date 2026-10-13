@@ -26,7 +26,7 @@ else
 KDIR ?= /lib/modules/$(shell uname -r)/build
 
 all:
-	./select-variant.sh
+	./select-variant.sh $(KERNEL_VERSION)
 	$(MAKE) -C $(KDIR) M=$(CURDIR) modules
 
 clean:

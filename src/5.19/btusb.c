@@ -789,8 +789,13 @@ static void btusb_csr_cmd_timeout(struct hci_dev *hdev)
 	if (!test_bit(BTUSB_FAKE_CSR, &data->flags))
 		return;
 
+	if (++data->cmd_timeout_cnt < 5) {
+		bt_dev_warn(hdev, "CSR: command timeout seen (%u/5)", data->cmd_timeout_cnt);
+		return;
+	}
+
 	bt_dev_err(hdev, "CSR: command timeout recovery attempt %u",
-		   ++data->cmd_timeout_cnt);
+		   data->cmd_timeout_cnt);
 
 	if (test_and_set_bit(BTUSB_HW_RESET_ACTIVE, &data->flags)) {
 		bt_dev_err(hdev, "CSR: last reset still active, not resetting again");
@@ -1853,14 +1858,58 @@ static int submit_or_queue_tx_urb(struct hci_dev *hdev, struct urb *urb)
 	return 0;
 }
 
+static int inject_cmd_complete_tx_power(struct hci_dev *hdev, __le16 handle)
+{
+	struct sk_buff *skb;
+	struct hci_event_hdr *hdr;
+	struct hci_ev_cmd_complete *evt;
+	struct hci_rp_read_tx_power *rp;
+
+	skb = bt_skb_alloc(sizeof(*hdr) + sizeof(*evt) + sizeof(*rp), GFP_ATOMIC);
+	if (!skb)
+		return -ENOMEM;
+
+	hdr = skb_put(skb, sizeof(*hdr));
+	hdr->evt = HCI_EV_CMD_COMPLETE;
+	hdr->plen = sizeof(*evt) + sizeof(*rp);
+
+	evt = skb_put(skb, sizeof(*evt));
+	evt->ncmd = 0x01;
+	evt->opcode = cpu_to_le16(HCI_OP_READ_TX_POWER);
+
+	rp = skb_put(skb, sizeof(*rp));
+	rp->status = 0x00;
+	rp->handle = handle;
+	rp->tx_power = 0;
+
+	hci_skb_pkt_type(skb) = HCI_EVENT_PKT;
+
+	return hci_recv_frame(hdev, skb);
+}
+
 static int btusb_send_frame(struct hci_dev *hdev, struct sk_buff *skb)
 {
+	struct btusb_data *data = hci_get_drvdata(hdev);
 	struct urb *urb;
 
 	BT_DBG("%s", hdev->name);
 
 	switch (hci_skb_pkt_type(skb)) {
 	case HCI_COMMAND_PKT:
+		if (test_bit(BTUSB_FAKE_CSR, &data->flags)) {
+			struct hci_command_hdr *cmd = (void *)skb->data;
+			__u16 opcode = le16_to_cpu(cmd->opcode);
+
+			if (opcode == HCI_OP_READ_TX_POWER &&
+			    skb->len >= sizeof(*cmd) + sizeof(struct hci_cp_read_tx_power)) {
+				struct hci_cp_read_tx_power *cp = (void *)(skb->data + sizeof(*cmd));
+				__le16 handle = cp->handle;
+
+				kfree_skb(skb);
+				return inject_cmd_complete_tx_power(hdev, handle);
+			}
+		}
+
 		urb = alloc_ctrl_urb(hdev, skb);
 		if (IS_ERR(urb))
 			return PTR_ERR(urb);
@@ -2122,12 +2171,18 @@ static void btusb_csr_mask_commands(struct hci_dev *hdev, struct sk_buff *skb)
 	if (rp->status)
 		return;
 
-	if (!(rp->commands[13] & 0x01))
-		return;
+	if (rp->commands[13] & 0x01) {
+		bt_dev_info(hdev, "CSR: clearing advertised support for Read Page Scan Type");
+		rp->commands[13] &= ~0x01;
+	}
 
-	bt_dev_info(hdev, "CSR: clearing advertised support for Read Page Scan Type");
-
-	rp->commands[13] &= ~0x01;
+	/* Octet 10, bit 2 is Read Transmit Power Level (0x0c2d). Clear it so
+	 * the core / stack knows it is unsupported.
+	 */
+	if (rp->commands[10] & BIT(2)) {
+		bt_dev_info(hdev, "CSR: clearing advertised support for Read Transmit Power Level");
+		rp->commands[10] &= ~BIT(2);
+	}
 }
 
 /* Pad the undersized command-complete payloads these clones return:
@@ -2154,6 +2209,15 @@ static int btusb_recv_event_csr(struct hci_dev *hdev, struct sk_buff *skb)
 	case HCI_OP_READ_LOCAL_COMMANDS:
 		if (csr_mask_commands)
 			btusb_csr_mask_commands(hdev, skb);
+		goto done;
+	case HCI_OP_SET_EVENT_FLT:
+		if (skb->len >= sizeof(*hdr) + sizeof(*cc) + 1) {
+			__u8 *status = skb->data + sizeof(*hdr) + sizeof(*cc);
+			if (*status != 0x00) {
+				bt_dev_info(hdev, "CSR: overriding Set Event Filter error 0x%02x to success", *status);
+				*status = 0x00;
+			}
+		}
 		goto done;
 	case HCI_OP_READ_VOICE_SETTING:
 		expected_plen = sizeof(*cc) + 3; /* status + __le16 */
@@ -2342,54 +2406,56 @@ static int btusb_setup_csr(struct hci_dev *hdev)
 		 * apply this initialization quirk to every controller that gets here,
 		 * it should be harmless. The alternative is to not work at all.
 		 */
-		btusb_log_csr_pm_state(hdev, data, "before allow", 0);
-		pm_runtime_allow(&data->udev->dev);
-		btusb_log_csr_pm_state(hdev, data, "after allow", 0);
+		if (bcdDevice == 0x0134 || bcdDevice == 0x7558) {
+			btusb_log_csr_pm_state(hdev, data, "before allow", 0);
+			pm_runtime_allow(&data->udev->dev);
+			btusb_log_csr_pm_state(hdev, data, "after allow", 0);
 
-		/* autosuspend_check() refuses while an interface needs remote
-		 * wakeup or holds an autopm reference. Any reference here is
-		 * usb_probe_interface()'s, held across probe, so wait for it
-		 * to go rather than drop a reference we do not own.
-		 */
-		data->intf->needs_remote_wakeup = 0;
-		for (waited = 0; waited < 200 &&
-		     atomic_read(&data->intf->dev.power.usage_count); waited += 10)
-			msleep(10);
-		if (atomic_read(&data->intf->dev.power.usage_count))
-			bt_dev_warn(hdev, "CSR: interface still busy after %d ms", waited);
-		btusb_log_csr_pm_state(hdev, data, "pre-suspend", 0);
+			/* autosuspend_check() refuses while an interface needs remote
+			 * wakeup or holds an autopm reference. Any reference here is
+			 * usb_probe_interface()'s, held across probe, so wait for it
+			 * to go rather than drop a reference we do not own.
+			 */
+			data->intf->needs_remote_wakeup = 0;
+			for (waited = 0; waited < 200 &&
+			     atomic_read(&data->intf->dev.power.usage_count); waited += 10)
+				msleep(10);
+			if (atomic_read(&data->intf->dev.power.usage_count))
+				bt_dev_warn(hdev, "CSR: interface still busy after %d ms", waited);
+			btusb_log_csr_pm_state(hdev, data, "pre-suspend", 0);
 
-		ret = pm_runtime_force_suspend(&data->udev->dev);
-		if (ret < 0) {
-			/* Transient -EBUSY during boot; retry once. */
-			btusb_log_csr_pm_state(hdev, data, "force_suspend failed; retrying", ret);
-			msleep(100);
 			ret = pm_runtime_force_suspend(&data->udev->dev);
+			if (ret < 0) {
+				/* Transient -EBUSY during boot; retry once. */
+				btusb_log_csr_pm_state(hdev, data, "force_suspend failed; retrying", ret);
+				msleep(100);
+				ret = pm_runtime_force_suspend(&data->udev->dev);
+			}
+			/* Wake the device back up right away. Clones come back with a
+			 * half-dead radio if they are left suspended for long.
+			 */
+			if (usb_autopm_get_interface(data->intf) == 0)
+				usb_autopm_put_interface_no_suspend(data->intf);
+			data->intf->needs_remote_wakeup = 1;
+
+			btusb_log_csr_pm_state(hdev, data, "after force_suspend", ret);
+
+			if (ret >= 0) {
+				msleep(200);
+				ret = pm_runtime_force_resume(&data->udev->dev);
+				btusb_log_csr_pm_state(hdev, data, "after force_resume", ret);
+			} else {
+				/* force_suspend() re-enables runtime PM on failure. */
+				bt_dev_warn(hdev, "CSR: force_suspend failed; skipping one-shot suspend");
+			}
+
+			pm_runtime_forbid(&data->udev->dev);
+			btusb_log_csr_pm_state(hdev, data, "after forbid", 0);
+
+			/* Re-enable autosuspend if this was requested */
+			if (enable_autosuspend)
+				usb_enable_autosuspend(data->udev);
 		}
-		/* Wake the device back up right away. Clones come back with a
-		 * half-dead radio if they are left suspended for long.
-		 */
-		if (usb_autopm_get_interface(data->intf) == 0)
-			usb_autopm_put_interface_no_suspend(data->intf);
-		data->intf->needs_remote_wakeup = 1;
-
-		btusb_log_csr_pm_state(hdev, data, "after force_suspend", ret);
-
-		if (ret >= 0) {
-			msleep(200);
-			ret = pm_runtime_force_resume(&data->udev->dev);
-			btusb_log_csr_pm_state(hdev, data, "after force_resume", ret);
-		} else {
-			/* force_suspend() re-enables runtime PM on failure. */
-			bt_dev_warn(hdev, "CSR: force_suspend failed; skipping one-shot suspend");
-		}
-
-		pm_runtime_forbid(&data->udev->dev);
-		btusb_log_csr_pm_state(hdev, data, "after forbid", 0);
-
-		/* Re-enable autosuspend if this was requested */
-		if (enable_autosuspend)
-			usb_enable_autosuspend(data->udev);
 	}
 
 	kfree_skb(skb);

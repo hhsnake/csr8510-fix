@@ -24,6 +24,9 @@ Bluetooth: hci0: Opcode 0x0c03 failed: -110
 or
 Bluetooth: hci0: Opcode 0x0c25 failed: -110
 Can't init device hci0: Connection timed out (110)
+or
+Set Event Filter (0x03|0x0005) -> Status: Invalid HCI Command Parameters (0x12)
+Can't init device hci0: Invalid argument (22)
 ```
 
 These are cheap clone chips (Barrot 8041a02 and similar, usually sold as a
@@ -42,8 +45,20 @@ enough for this hardware. This patch additionally:
   0x0c46. 0x0c25 is deliberately left advertised: since v6.15 the core
   treats an unsupported Read Voice Setting as "no SCO" and zeroes the SCO
   buffer count, which disables HFP audio;
-* fixes the fragile USB runtime-PM suspend workaround;
-* auto-recovers with a USB reset from init failures and command timeouts,
+* intercepts `Set Event Filter` (`0x0c05` / `0x03|0x0005`), which clones like
+  `bcdDevice=0x8891` fail with status `0x12` (`Invalid HCI Command Parameters`),
+  and overrides it to success (`0x00`), fixing `Can't init device hci0: Invalid argument (22)`;
+* limits the fragile USB runtime-PM force-suspend workaround strictly to
+  controllers known to require it (`bcdDevice` `0x0134` and `0x7558`), preventing
+  runtime-PM hangs/warnings on newer clone variants like `0x8891`;
+* intercepts `Read Transmit Power Level` (`0x0c2d`), which clones like `bcdDevice=0x8891`
+  hang on when queried periodically by sound daemons (PipeWire/PulseAudio/blueman),
+  immediately returning a synthetic Command Complete event (0 dBm) and clearing its
+  advertised bit in Supported Commands, preventing `command 0x0c2d tx timeout` and
+  preventing audio headsets from disconnecting every few minutes;
+* requires 5 consecutive command timeouts before escalating to a hard USB device reset,
+  avoiding dropping active connections on isolated non-critical timeouts;
+* auto-recovers with a USB reset from init failures and persistent command timeouts,
   including a dongle that answers nothing at all — not even the very first
   `Reset` (0x0c03) — instead of leaving the controller stuck.
 
@@ -142,6 +157,56 @@ sudo ./install.sh
 > the `steamos-readonly disable` state are all reset. Re-run `install.sh`
 > after each system update, or keep the built `.ko` on `/home` — that
 > partition survives updates — and load it from a systemd unit.
+
+### NixOS
+
+NixOS manages kernel modules declaratively rather than using DKMS.
+
+#### Standard `configuration.nix` (channels / non-flake):
+
+```nix
+{ config, pkgs, ... }:
+
+let
+  csr8510-fix = config.boot.kernelPackages.callPackage (fetchTarball "https://github.com/hhsnake/csr8510-fix/archive/main.tar.gz") { };
+  # Or from a local clone:
+  # csr8510-fix = config.boot.kernelPackages.callPackage /path/to/csr8510-fix { };
+in
+{
+  boot.extraModulePackages = [ csr8510-fix ];
+
+  hardware.bluetooth.enable = true;
+  hardware.bluetooth.powerOnBoot = true;
+}
+```
+
+#### With Nix Flakes:
+
+In your `flake.nix`:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    csr8510-fix.url = "github:hhsnake/csr8510-fix";
+  };
+
+  outputs = { self, nixpkgs, csr8510-fix, ... }: {
+    nixosConfigurations.myhostname = nixpkgs.lib.nixosSystem {
+      modules = [
+        csr8510-fix.nixosModules.default
+        ./configuration.nix
+      ];
+    };
+  };
+}
+```
+
+Rebuild your system:
+
+```bash
+sudo nixos-rebuild switch
+```
 
 The module is installed to `/lib/modules/<ver>/updates/dkms/` (takes
 precedence over the stock module, nothing in the kernel is overwritten)

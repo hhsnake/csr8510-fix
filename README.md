@@ -43,6 +43,9 @@ enough for this hardware. This patch additionally:
   treats an unsupported Read Voice Setting as "no SCO" and zeroes the SCO
   buffer count, which disables HFP audio;
 * fixes the fragile USB runtime-PM suspend workaround;
+* on the Barrot controller with USB device revision `0x8891` and HCI
+  manufacturer `2279`, sets 16-bit CVSD PCM after HCI initialization for the
+  `src/6.17` kernel variant, matching the Linux SCO socket default;
 * auto-recovers with a USB reset from init failures and command timeouts,
   including a dongle that answers nothing at all — not even the very first
   `Reset` (0x0c03) — instead of leaving the controller stuck.

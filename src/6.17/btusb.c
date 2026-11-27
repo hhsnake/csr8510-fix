@@ -2554,6 +2554,29 @@ static void btusb_log_csr_pm_state(struct hci_dev *hdev, struct btusb_data *data
 		    device_can_wakeup(&data->udev->dev));
 }
 
+/* The Barrot 8891 controller resets its global PCM setting to 8-bit,
+ * whereas Linux SCO sockets default to signed 16-bit CVSD. Set it after
+ * HCI initialization so the controller and USB alternate setting agree.
+ */
+static int btusb_barrot_post_init(struct hci_dev *hdev)
+{
+	struct hci_cp_write_voice_setting cp = {
+		.voice_setting = cpu_to_le16(BT_VOICE_CVSD_16BIT),
+	};
+	struct sk_buff *skb;
+
+	skb = __hci_cmd_sync(hdev, HCI_OP_WRITE_VOICE_SETTING, sizeof(cp),
+			     &cp, HCI_INIT_TIMEOUT);
+	if (IS_ERR(skb)) {
+		bt_dev_err(hdev, "Barrot: failed to set 16-bit SCO voice setting (%ld)",
+			   PTR_ERR(skb));
+		return PTR_ERR(skb);
+	}
+	kfree_skb(skb);
+	bt_dev_info(hdev, "Barrot: set 16-bit SCO voice setting");
+	return 0;
+}
+
 static int btusb_setup_csr(struct hci_dev *hdev)
 {
 	struct btusb_data *data = hci_get_drvdata(hdev);
@@ -2648,6 +2671,9 @@ static int btusb_setup_csr(struct hci_dev *hdev)
 
 	if (is_fake) {
 		int waited;
+
+		if (bcdDevice == 0x8891 && le16_to_cpu(rp->manufacturer) == 2279)
+			hdev->post_init = btusb_barrot_post_init;
 
 		bt_dev_warn(hdev, "CSR: Unbranded CSR clone detected; adding workarounds and force-suspending once...");
 		set_bit(BTUSB_FAKE_CSR, &data->flags);
